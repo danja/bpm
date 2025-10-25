@@ -2,11 +2,20 @@
 
 Real-time Flutter application that captures microphone audio, runs multiple BPM detection algorithms (onset energy + autocorrelation to start), and surfaces both individual and consensus tempo estimates. The architecture follows the layered approach defined in `docs/PLAN-01.md`.
 
+### Live Trend Feedback
+
+- Consensus card now shows both the current BPM and the immediately previous reading, with a delta indicator so you can see whether estimates are converging.
+- A sparkline below the summary card visualizes the last ~12 consensus readings, providing an at-a-glance view of incremental improvements as algorithms stabilize.
+
 ## Getting Started
 
 1. Install Flutter 3.13+ and enable iOS/Android tooling.
 2. From the repo root, run `flutter pub get`.
 3. Launch the app with `flutter run` (enable microphone permissions).
+
+## Supported Platforms
+
+The repository now includes the standard Flutter scaffolding for Android, iOS, web, macOS, Windows, and Linux (generated via `flutter create .`). Use `flutter config --enable-<platform>-desktop` as needed before running on those targets.
 
 Key docs:
 

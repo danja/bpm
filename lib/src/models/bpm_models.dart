@@ -88,3 +88,25 @@ class BpmSummary extends Equatable {
         readings: [],
       );
 }
+
+class BpmHistoryPoint extends Equatable {
+  const BpmHistoryPoint({
+    required this.bpm,
+    required this.confidence,
+    required this.timestamp,
+  });
+
+  final double bpm;
+  final double confidence;
+  final DateTime timestamp;
+
+  factory BpmHistoryPoint.fromConsensus(ConsensusResult consensus) =>
+      BpmHistoryPoint(
+        bpm: consensus.bpm,
+        confidence: consensus.confidence,
+        timestamp: DateTime.now().toUtc(),
+      );
+
+  @override
+  List<Object?> get props => [bpm, confidence, timestamp];
+}

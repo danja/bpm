@@ -2,6 +2,7 @@ import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/state/bpm_state.dart';
 import 'package:bpm/src/ui/widgets/algorithm_readings_list.dart';
 import 'package:bpm/src/ui/widgets/bpm_summary_card.dart';
+import 'package:bpm/src/ui/widgets/bpm_trend_sparkline.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -22,6 +23,10 @@ class HomeScreen extends StatelessWidget {
               children: [
                 BpmSummaryCard(state: state),
                 const SizedBox(height: 12),
+                if (state.history.length >= 2) ...[
+                  BpmTrendSparkline(history: state.history),
+                  const SizedBox(height: 12),
+                ],
                 AlgorithmReadingsList(state: state),
                 const SizedBox(height: 12),
                 _StatusBanner(state: state),

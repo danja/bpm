@@ -10,6 +10,7 @@ class BpmCubit extends Cubit<BpmState> {
 
   final BpmRepository _repository;
   StreamSubscription<BpmSummary>? _subscription;
+  static const _maxHistoryPoints = 12;
 
   Future<void> start() async {
     if (_subscription != null) {
@@ -31,6 +32,7 @@ class BpmCubit extends Cubit<BpmState> {
               readings: summary.readings,
               consensus: summary.consensus,
               message: summary.message,
+              history: _updatedHistory(state.history, summary),
             ),
           ),
           onError: (error, stackTrace) {
@@ -55,5 +57,22 @@ class BpmCubit extends Cubit<BpmState> {
   Future<void> close() async {
     await stop();
     return super.close();
+  }
+
+  List<BpmHistoryPoint> _updatedHistory(
+    List<BpmHistoryPoint> current,
+    BpmSummary summary,
+  ) {
+    final consensus = summary.consensus;
+    if (consensus == null) {
+      return current;
+    }
+
+    final next = List<BpmHistoryPoint>.from(current)
+      ..add(BpmHistoryPoint.fromConsensus(consensus));
+    if (next.length > _maxHistoryPoints) {
+      next.removeRange(0, next.length - _maxHistoryPoints);
+    }
+    return next;
   }
 }

@@ -10,6 +10,12 @@ class BpmSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final consensus = state.consensus;
     final textTheme = Theme.of(context).textTheme;
+    final previous = state.history.length >= 2
+        ? state.history[state.history.length - 2]
+        : null;
+    final delta = previous != null && consensus != null
+        ? consensus.bpm - previous.bpm
+        : null;
 
     return Card(
       child: Padding(
@@ -49,6 +55,30 @@ class BpmSummaryCard extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: consensus.confidence,
                   minHeight: 6,
+                ),
+              ),
+            if (previous != null && consensus != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Row(
+                  children: [
+                    Text(
+                      'Previous ${previous.bpm.toStringAsFixed(1)} BPM',
+                      style: textTheme.bodyMedium,
+                    ),
+                    const Spacer(),
+                    if (delta != null)
+                      Text(
+                        delta >= 0
+                            ? '+${delta.toStringAsFixed(1)}'
+                            : delta.toStringAsFixed(1),
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: delta >= 0
+                              ? Colors.green.shade600
+                              : Colors.red.shade400,
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],
