@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
@@ -44,14 +45,14 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       ..setRange(0, min(samples.length, fftSize), samples);
 
     final windowed = SignalUtils.applyHannWindow(padded);
-    final fft = RealFft(fftSize);
-    final spectrum = fft.forward(windowed);
+    final fft = FFT(fftSize);
+    final spectrum = fft.realFft(windowed);
     final nyquist = spectrum.length;
     if (nyquist <= 1) return null;
 
     final magnitudes = List<double>.generate(
       nyquist,
-      (i) => spectrum[i].abs(),
+      (i) => _magnitude(spectrum[i]),
     );
 
     final freqResolution = context.sampleRate / fftSize;
@@ -96,4 +97,10 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       },
     );
   }
+}
+
+double _magnitude(Float64x2 value) {
+  final real = value.x;
+  final imag = value.y;
+  return sqrt(real * real + imag * imag);
 }

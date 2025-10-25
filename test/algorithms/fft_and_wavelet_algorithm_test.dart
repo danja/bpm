@@ -2,7 +2,7 @@ import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/models/bpm_models.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 
 import '../support/signal_factory.dart';
 

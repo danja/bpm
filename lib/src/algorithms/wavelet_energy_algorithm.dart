@@ -36,77 +36,65 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final pow2 = SignalUtils.nextPowerOfTwo(samples.length);
-    final padded = List<double>.filled(pow2, 0)
-      ..setRange(0, samples.length, samples);
-
-    final detailLevels = _haarDetailBands(padded, levels);
-    if (detailLevels.isEmpty) return null;
-
-    double? bestBpm;
-    double bestScore = double.negativeInfinity;
-    int bestLevel = 0;
-    int bestLag = 0;
-
-    for (var level = 0; level < detailLevels.length; level++) {
-      final details = detailLevels[level];
-      final envelope = details.map((value) => value.abs()).toList();
-
-      final scale = pow(2, level).toInt();
-      final minLag =
-          (context.sampleRate * 60 / context.maxBpm / scale).floor().clamp(1, envelope.length - 1);
-      final maxLag =
-          (context.sampleRate * 60 / context.minBpm / scale).floor().clamp(minLag + 1, envelope.length - 1);
-      if (minLag >= maxLag) {
-        continue;
-      }
-
-      final lag = SignalUtils.dominantLag(
-        envelope,
-        minLag: minLag,
-        maxLag: maxLag,
-      );
-      if (lag == null) continue;
-
-      final score = SignalUtils.autocorrelation(envelope, lag);
-      if (score > bestScore) {
-        bestScore = score;
-        bestLevel = level;
-        bestLag = lag;
-        final lagSamples = lag * scale;
-        bestBpm = 60 * context.sampleRate / lagSamples;
-      }
+    final pow2 = SignalUtils.previousPowerOfTwo(samples.length);
+    if (pow2 < 32) {
+      return null;
     }
+    final trimmed = samples.sublist(0, pow2);
 
-    if (bestBpm == null ||
-        bestBpm < context.minBpm ||
-        bestBpm > context.maxBpm ||
-        bestScore <= 0) {
+    final envelope = _buildWaveletEnvelope(trimmed, levels);
+    if (envelope.isEmpty || envelope.every((value) => value == 0)) {
       return null;
     }
 
-    final confidence = bestScore.clamp(0.0, 1.0);
+    final normalized = SignalUtils.normalize(_removeDc(envelope));
+
+    final minLag =
+        (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, normalized.length - 1);
+    final maxLag =
+        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, normalized.length - 1);
+    if (minLag >= maxLag) {
+      return null;
+    }
+
+    final lag = SignalUtils.dominantLag(
+      normalized,
+      minLag: minLag,
+      maxLag: maxLag,
+    );
+    if (lag == null) {
+      return null;
+    }
+
+    final bpm = 60 * context.sampleRate / lag;
+    if (bpm < context.minBpm || bpm > context.maxBpm) {
+      return null;
+    }
+
+    final confidence = SignalUtils.autocorrelation(normalized, lag).clamp(0.0, 1.0);
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: bestBpm,
+      bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
       metadata: {
-        'level': bestLevel,
-        'lag': bestLag,
+        'lag': lag,
       },
     );
   }
 
-  List<List<double>> _haarDetailBands(List<double> samples, int maxLevels) {
-    final detailBands = <List<double>>[];
+  List<double> _buildWaveletEnvelope(List<double> samples, int maxLevels) {
+    final aggregated = List<double>.filled(samples.length, 0.0);
     var current = List<double>.from(samples);
     final sqrt2 = sqrt2Constant;
 
     for (var level = 0; level < maxLevels; level++) {
-      if (current.length < 2) break;
+      if (current.length < 2) {
+        break;
+      }
+
       final approx = <double>[];
       final details = <double>[];
 
@@ -117,12 +105,68 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         details.add((a - b) / sqrt2);
       }
 
-      detailBands.add(details);
+      if (details.isEmpty) {
+        break;
+      }
+
+      final energy = details.map((value) => value * value).toList();
+      final smoothWindow = max(2, energy.length ~/ 32);
+      final smoothed = _movingAverage(energy, smoothWindow);
+      final upsampled = _upsampleToLength(smoothed, aggregated.length);
+
+      for (var i = 0; i < aggregated.length; i++) {
+        aggregated[i] += upsampled[i];
+      }
+
       current = approx;
     }
-
-    return detailBands;
+    return aggregated;
   }
 }
 
 const sqrt2Constant = 1.4142135623730951;
+
+List<double> _movingAverage(List<double> data, int windowSize) {
+  if (data.isEmpty || windowSize <= 1) {
+    return List<double>.from(data);
+  }
+  final window = min(windowSize, data.length);
+  final result = List<double>.filled(data.length, 0);
+  var sum = 0.0;
+
+  for (var i = 0; i < data.length; i++) {
+    sum += data[i];
+    if (i >= window) {
+      sum -= data[i - window];
+    }
+    final currentWindow = min(i + 1, window);
+    result[i] = sum / currentWindow;
+  }
+  return result;
+}
+
+List<double> _removeDc(List<double> data) {
+  if (data.isEmpty) return data;
+  final mean = data.reduce((a, b) => a + b) / data.length;
+  return data.map((value) => value - mean).toList();
+}
+
+List<double> _upsampleToLength(List<double> data, int targetLength) {
+  if (targetLength <= 0) {
+    return const [];
+  }
+  if (data.isEmpty) {
+    return List<double>.filled(targetLength, 0);
+  }
+  if (data.length == targetLength) {
+    return List<double>.from(data);
+  }
+
+  final result = List<double>.filled(targetLength, 0);
+  final scale = data.length / targetLength;
+  for (var i = 0; i < targetLength; i++) {
+    final sourceIndex = (i * scale).floor().clamp(0, data.length - 1);
+    result[i] = data[sourceIndex];
+  }
+  return result;
+}

@@ -22,6 +22,17 @@ class SignalUtils {
     return v + 1;
   }
 
+  static int previousPowerOfTwo(int value) {
+    if (value <= 1) {
+      return value <= 0 ? 1 : 1;
+    }
+    var v = nextPowerOfTwo(value);
+    if (v == value) {
+      return value;
+    }
+    return v >> 1;
+  }
+
   static List<double> applyHannWindow(List<double> samples) {
     final length = samples.length;
     if (length <= 1) {
