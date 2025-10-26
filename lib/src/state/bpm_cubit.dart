@@ -33,6 +33,7 @@ class BpmCubit extends Cubit<BpmState> {
               consensus: summary.consensus,
               message: summary.message,
               history: _updatedHistory(state.history, summary),
+              previewSamples: summary.previewSamples,
             ),
           ),
           onError: (error, stackTrace) {
@@ -64,7 +65,8 @@ class BpmCubit extends Cubit<BpmState> {
     BpmSummary summary,
   ) {
     final consensus = summary.consensus;
-    if (consensus == null) {
+    if (consensus == null ||
+        summary.status != DetectionStatus.streamingResults) {
       return current;
     }
 

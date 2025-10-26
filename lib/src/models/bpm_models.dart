@@ -73,19 +73,22 @@ class BpmSummary extends Equatable {
     required this.readings,
     this.consensus,
     this.message,
+    this.previewSamples = const [],
   });
 
   final DetectionStatus status;
   final List<BpmReading> readings;
   final ConsensusResult? consensus;
   final String? message;
+  final List<double> previewSamples;
 
   @override
-  List<Object?> get props => [status, readings, consensus, message];
+  List<Object?> get props => [status, readings, consensus, message, previewSamples];
 
   factory BpmSummary.idle() => const BpmSummary(
         status: DetectionStatus.idle,
         readings: [],
+        previewSamples: [],
       );
 }
 

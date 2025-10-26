@@ -30,13 +30,18 @@ class BpmDetectorCoordinator {
     yield BpmSummary(
       status: DetectionStatus.listening,
       readings: const [],
+      previewSamples: const [],
     );
 
     final controller = StreamController<BpmSummary>();
     final buffer = Queue<_BufferedFrame>();
+    final waveform = Queue<double>();
     var bufferDuration = Duration.zero;
     var elapsedSinceLastAnalysis = Duration.zero;
-    var hasReportedBuffering = false;
+    var elapsedSincePreview = Duration.zero;
+    var currentStatus = DetectionStatus.listening;
+    var latestReadings = const <BpmReading>[];
+    ConsensusResult? latestConsensus;
 
     final frameSub = audioSource.frames(streamConfig).listen(
       (frame) async {
@@ -53,22 +58,31 @@ class BpmDetectorCoordinator {
         );
         bufferDuration += frameDuration;
         elapsedSinceLastAnalysis += frameDuration;
+        elapsedSincePreview += frameDuration;
+        _accumulateWaveform(waveform, frame.samples, _scopeSampleLimit);
 
         while (bufferDuration > bufferWindow && buffer.isNotEmpty) {
           final removed = buffer.removeFirst();
           bufferDuration -= removed.duration;
         }
 
+        if (elapsedSincePreview >= _scopePreviewInterval) {
+          elapsedSincePreview = Duration.zero;
+          final previewStatus = bufferDuration < bufferWindow
+              ? DetectionStatus.buffering
+              : currentStatus;
+          controller.add(
+            BpmSummary(
+              status: previewStatus,
+              readings: latestReadings,
+              consensus: latestConsensus,
+              previewSamples: _waveformSnapshot(waveform),
+            ),
+          );
+        }
+
         if (bufferDuration < bufferWindow) {
-          if (!hasReportedBuffering) {
-            controller.add(
-              BpmSummary(
-                status: DetectionStatus.buffering,
-                readings: const [],
-              ),
-            );
-            hasReportedBuffering = true;
-          }
+          currentStatus = DetectionStatus.buffering;
           return;
         }
 
@@ -76,12 +90,13 @@ class BpmDetectorCoordinator {
           return;
         }
         elapsedSinceLastAnalysis = Duration.zero;
-        hasReportedBuffering = false;
-
+        currentStatus = DetectionStatus.analyzing;
         controller.add(
           BpmSummary(
             status: DetectionStatus.analyzing,
-            readings: const [],
+            readings: latestReadings,
+            consensus: latestConsensus,
+            previewSamples: _waveformSnapshot(waveform),
           ),
         );
 
@@ -98,12 +113,16 @@ class BpmDetectorCoordinator {
 
         final filtered = readings.whereType<BpmReading>().toList();
         final consensus = consensusEngine.combine(filtered);
+        latestReadings = filtered;
+        latestConsensus = consensus;
 
+        currentStatus = DetectionStatus.streamingResults;
         controller.add(
           BpmSummary(
             status: DetectionStatus.streamingResults,
             readings: filtered,
             consensus: consensus,
+            previewSamples: _waveformSnapshot(waveform),
           ),
         );
       },
@@ -121,4 +140,27 @@ class _BufferedFrame {
 
   final AudioFrame frame;
   final Duration duration;
+}
+
+const int _scopeSampleLimit = 2048;
+const Duration _scopePreviewInterval = Duration(milliseconds: 120);
+
+void _accumulateWaveform(
+  Queue<double> target,
+  List<double> samples,
+  int maxLength,
+) {
+  for (final sample in samples) {
+    target.addLast(sample);
+    if (target.length > maxLength) {
+      target.removeFirst();
+    }
+  }
+}
+
+List<double> _waveformSnapshot(Queue<double> source) {
+  if (source.isEmpty) {
+    return const [];
+  }
+  return List<double>.from(source);
 }

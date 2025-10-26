@@ -9,6 +9,7 @@ class BpmState extends Equatable {
     this.consensus,
     this.message,
     this.history = const <BpmHistoryPoint>[],
+    this.previewSamples = const [],
   });
 
   final DetectionStatus status;
@@ -16,11 +17,13 @@ class BpmState extends Equatable {
   final ConsensusResult? consensus;
   final String? message;
   final List<BpmHistoryPoint> history;
+  final List<double> previewSamples;
 
   factory BpmState.initial() => const BpmState(
         status: DetectionStatus.idle,
         readings: [],
         history: [],
+        previewSamples: [],
       );
 
   BpmState copyWith({
@@ -30,6 +33,7 @@ class BpmState extends Equatable {
     bool clearConsensus = false,
     String? message,
     List<BpmHistoryPoint>? history,
+    List<double>? previewSamples,
   }) {
     return BpmState(
       status: status ?? this.status,
@@ -37,9 +41,11 @@ class BpmState extends Equatable {
       consensus: clearConsensus ? null : (consensus ?? this.consensus),
       message: message ?? this.message,
       history: history ?? this.history,
+      previewSamples: previewSamples ?? this.previewSamples,
     );
   }
 
   @override
-  List<Object?> get props => [status, readings, consensus, message, history];
+  List<Object?> get props =>
+      [status, readings, consensus, message, history, previewSamples];
 }
