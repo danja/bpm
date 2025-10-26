@@ -15,7 +15,7 @@ void main() {
     windowDuration: Duration(seconds: 12),
   );
 
-  List<AudioFrame> _windowFromSignal(List<double> samples) =>
+  List<AudioFrame> windowFromSignal(List<double> samples) =>
       SignalFactory.framesFromSamples(
         samples,
         sampleRate: sampleRate,
@@ -29,7 +29,7 @@ void main() {
       duration: const Duration(seconds: 12),
     );
 
-    final frames = _windowFromSignal(signal);
+    final frames = windowFromSignal(signal);
     final algorithm = FftSpectrumAlgorithm();
 
     final reading = await algorithm.analyze(
@@ -51,7 +51,7 @@ void main() {
       noiseAmplitude: 0.1,
     );
 
-    final frames = _windowFromSignal(signal);
+    final frames = windowFromSignal(signal);
     final algorithm = WaveletEnergyAlgorithm(levels: 4);
 
     final reading = await algorithm.analyze(
@@ -59,6 +59,7 @@ void main() {
       context: detectionContext,
     );
 
+    printOnFailure('Wavelet reading: ${reading?.bpm}, metadata: ${reading?.metadata}');
     expect(reading, isNotNull);
     expect((reading!.bpm - targetBpm).abs(), lessThan(4));
     expect(reading.confidence, greaterThan(0));

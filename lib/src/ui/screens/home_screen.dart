@@ -1,3 +1,4 @@
+import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/state/bpm_state.dart';
 import 'package:bpm/src/ui/widgets/algorithm_readings_list.dart';

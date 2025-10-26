@@ -7,9 +7,10 @@ import 'package:bpm/src/models/bpm_models.dart';
 import 'package:record/record.dart';
 
 class RecordAudioStreamSource implements AudioStreamSource {
-  RecordAudioStreamSource({Record? record}) : _record = record ?? Record();
+  RecordAudioStreamSource({AudioRecorder? recorder})
+      : _recorder = recorder ?? AudioRecorder();
 
-  final Record _record;
+  final AudioRecorder _recorder;
   StreamController<AudioFrame>? _controller;
   StreamSubscription<Uint8List>? _recordSub;
   int _sequence = 0;
@@ -20,15 +21,18 @@ class RecordAudioStreamSource implements AudioStreamSource {
       return;
     }
 
-    if (!await _record.hasPermission()) {
+    if (!await _recorder.hasPermission()) {
       throw Exception('Microphone permission not granted');
     }
 
-    final stream = await _record.startStream(
-      encoder: AudioEncoder.pcm16bit,
+    final recordConfig = RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
       bitRate: config.sampleRate * 16,
-      samplingRate: config.sampleRate,
+      sampleRate: config.sampleRate,
+      numChannels: config.channels,
     );
+
+    final stream = await _recorder.startStream(recordConfig);
 
     _controller = StreamController<AudioFrame>.broadcast(
       onCancel: () => stop(),
@@ -57,7 +61,7 @@ class RecordAudioStreamSource implements AudioStreamSource {
   Future<void> stop() async {
     await _recordSub?.cancel();
     _recordSub = null;
-    await _record.stop();
+    await _recorder.stop();
     await _controller?.close();
     _controller = null;
     _sequence = 0;

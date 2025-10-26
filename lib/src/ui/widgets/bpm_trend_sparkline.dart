@@ -34,7 +34,7 @@ class BpmTrendSparkline extends StatelessWidget {
                 painter: _SparklinePainter(
                   history: history,
                   lineColor: color,
-                  fillColor: color.withOpacity(0.15),
+                  fillColor: color.withValues(alpha: 0.15),
                 ),
                 size: Size.infinite,
               ),

@@ -11,10 +11,10 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
   final int frameMillis;
 
   @override
-  String get id = 'simple_onset';
+  String get id => 'simple_onset';
 
   @override
-  String get label = 'Onset Energy';
+  String get label => 'Onset Energy';
 
   @override
   Duration get preferredWindow => const Duration(seconds: 8);
