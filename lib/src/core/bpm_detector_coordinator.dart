@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
@@ -12,12 +13,14 @@ class BpmDetectorCoordinator {
     required this.registry,
     required this.consensusEngine,
     this.bufferWindow = const Duration(seconds: 10),
+    this.analysisInterval = const Duration(seconds: 1),
   });
 
   final AudioStreamSource audioSource;
   final AlgorithmRegistry registry;
   final ConsensusEngine consensusEngine;
   final Duration bufferWindow;
+  final Duration analysisInterval;
 
   Stream<BpmSummary> start({
     required AudioStreamConfig streamConfig,
@@ -30,50 +33,79 @@ class BpmDetectorCoordinator {
     );
 
     final controller = StreamController<BpmSummary>();
-    final buffer = <AudioFrame>[];
+    final buffer = Queue<_BufferedFrame>();
     var bufferDuration = Duration.zero;
+    var elapsedSinceLastAnalysis = Duration.zero;
+    var hasReportedBuffering = false;
 
     final frameSub = audioSource.frames(streamConfig).listen(
       (frame) async {
-        buffer.add(frame);
         final frameDuration = Duration(
-          microseconds:
-              (frame.samples.length / frame.sampleRate * Duration.microsecondsPerSecond)
-                  .round(),
+          microseconds: (frame.samples.length / frame.sampleRate *
+                  Duration.microsecondsPerSecond)
+              .round(),
+        );
+        buffer.add(
+          _BufferedFrame(
+            frame: frame,
+            duration: frameDuration,
+          ),
         );
         bufferDuration += frameDuration;
+        elapsedSinceLastAnalysis += frameDuration;
 
-        if (bufferDuration >= bufferWindow) {
-          controller.add(
-            BpmSummary(
-              status: DetectionStatus.analyzing,
-              readings: const [],
-            ),
-          );
-
-          final readings = await Future.wait(
-            registry.algorithms.map(
-              (algorithm) => algorithm.analyze(
-                window: List.of(buffer),
-                context: context,
-              ),
-            ),
-          );
-
-          buffer.clear();
-          bufferDuration = Duration.zero;
-
-          final filtered = readings.whereType<BpmReading>().toList();
-          final consensus = consensusEngine.combine(filtered);
-
-          controller.add(
-            BpmSummary(
-              status: DetectionStatus.streamingResults,
-              readings: filtered,
-              consensus: consensus,
-            ),
-          );
+        while (bufferDuration > bufferWindow && buffer.isNotEmpty) {
+          final removed = buffer.removeFirst();
+          bufferDuration -= removed.duration;
         }
+
+        if (bufferDuration < bufferWindow) {
+          if (!hasReportedBuffering) {
+            controller.add(
+              BpmSummary(
+                status: DetectionStatus.buffering,
+                readings: const [],
+              ),
+            );
+            hasReportedBuffering = true;
+          }
+          return;
+        }
+
+        if (elapsedSinceLastAnalysis < analysisInterval) {
+          return;
+        }
+        elapsedSinceLastAnalysis = Duration.zero;
+        hasReportedBuffering = false;
+
+        controller.add(
+          BpmSummary(
+            status: DetectionStatus.analyzing,
+            readings: const [],
+          ),
+        );
+
+        final windowFrames =
+            buffer.map((entry) => entry.frame).toList(growable: false);
+        final readings = await Future.wait(
+          registry.algorithms.map(
+            (algorithm) => algorithm.analyze(
+              window: windowFrames,
+              context: context,
+            ),
+          ),
+        );
+
+        final filtered = readings.whereType<BpmReading>().toList();
+        final consensus = consensusEngine.combine(filtered);
+
+        controller.add(
+          BpmSummary(
+            status: DetectionStatus.streamingResults,
+            readings: filtered,
+            consensus: consensus,
+          ),
+        );
       },
       onError: controller.addError,
       cancelOnError: true,
@@ -82,4 +114,11 @@ class BpmDetectorCoordinator {
     yield* controller.stream;
     await frameSub.cancel();
   }
+}
+
+class _BufferedFrame {
+  const _BufferedFrame({required this.frame, required this.duration});
+
+  final AudioFrame frame;
+  final Duration duration;
 }

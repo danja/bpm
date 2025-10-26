@@ -1,11 +1,13 @@
 # BPM Detection Tool
 
-Real-time Flutter application that captures microphone audio, runs multiple BPM detection algorithms (onset energy + autocorrelation to start), and surfaces both individual and consensus tempo estimates. The architecture follows the layered approach defined in `docs/PLAN-01.md`.
+Real-time Flutter application that captures microphone audio, runs multiple BPM detection algorithms (energy onset, autocorrelation, FFT spectrum, Haar-wavelet aggregation), and streams both individual and consensus tempo estimates. The architecture follows the layered approach defined in [`docs/PLAN-01.md`](docs/PLAN-01.md) and is tracked via the long-lived agents in [`AGENTS.md`](AGENTS.md).
 
-### Live Trend Feedback
+### Current Status
 
-- Consensus card now shows both the current BPM and the immediately previous reading, with a delta indicator so you can see whether estimates are converging.
-- A sparkline below the summary card visualizes the last ~12 consensus readings, providing an at-a-glance view of incremental improvements as algorithms stabilize.
+- ✅ **Core DSP**: Four complementary detectors wired up (see [`docs/algorithms.md`](docs/algorithms.md) for full descriptions and references).
+- ✅ **Real-time UI**: Consensus card + delta indicator + sparkline history are live.
+- ✅ **Platform plumbing**: `record` 6.x handles microphone streaming across mobile & desktop targets.
+- 🚧 **Next Up**: Accuracy benchmarking + automated regression harness (tracked in [`docs/next-steps.md`](docs/next-steps.md) and milestone updates in [`docs/PROGRESS.md`](docs/PROGRESS.md)).
 
 ## Getting Started
 
@@ -19,9 +21,12 @@ The repository now includes the standard Flutter scaffolding for Android, iOS, w
 
 Key docs:
 
-- `AGENTS.md` – ownership map.
-- `docs/PLAN-01.md` – master implementation plan.
-- `docs/PROGRESS.md` – milestone log.
+- [`AGENTS.md`](AGENTS.md) – ownership map / long-lived agents.
+- [`docs/PLAN-01.md`](docs/PLAN-01.md) – master implementation plan & architecture layers.
+- [`docs/algorithms.md`](docs/algorithms.md) – signal-processing approaches & citations.
+- [`docs/algo-overview.md`](docs/algo-overview.md) – backlog snapshot for algorithm work.
+- [`docs/next-steps.md`](docs/next-steps.md) – near-term engineering focus.
+- [`docs/PROGRESS.md`](docs/PROGRESS.md) – milestone log (append every major update).
 
 ## Deploying to an Android Phone
 
