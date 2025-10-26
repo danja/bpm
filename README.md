@@ -24,7 +24,6 @@ Key docs:
 - [`AGENTS.md`](AGENTS.md) – ownership map / long-lived agents.
 - [`docs/PLAN-01.md`](docs/PLAN-01.md) – master implementation plan & architecture layers.
 - [`docs/algorithms.md`](docs/algorithms.md) – signal-processing approaches & citations.
-- [`docs/algo-overview.md`](docs/algo-overview.md) – backlog snapshot for algorithm work.
 - [`docs/next-steps.md`](docs/next-steps.md) – near-term engineering focus.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) – milestone log (append every major update).
 
