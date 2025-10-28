@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="vinylGradient" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#3d3d3d"/>
+      <stop offset="40%" stop-color="#1d1d1d"/>
+      <stop offset="85%" stop-color="#060606"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <radialGradient id="labelGradient" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#f4f4f4"/>
+      <stop offset="100%" stop-color="#d7d7d7"/>
+    </radialGradient>
+    <radialGradient id="highlightGradient" cx="30%" cy="25%" r="35%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.45)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="#121212"/>
+
+  <circle cx="256" cy="256" r="228" fill="#000000"/>
+  <circle cx="256" cy="256" r="214" fill="url(#vinylGradient)"/>
+
+  <g fill="none" stroke="#1f1f1f" stroke-width="6">
+    <circle cx="256" cy="256" r="190" opacity="0.6"/>
+    <circle cx="256" cy="256" r="160" opacity="0.5"/>
+    <circle cx="256" cy="256" r="130" opacity="0.4"/>
+  </g>
+
+  <circle cx="256" cy="256" r="70" fill="url(#labelGradient)"/>
+  <circle cx="256" cy="256" r="20" fill="#111111"/>
+
+  <path d="M92 296c24-84 56-84 88 0s64 84 96 0 64-84 96 0 64 84 96 0" fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M146 134c64-46 156-46 220 0" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M366 402c-64 46-156 46-220 0" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="10" stroke-linecap="round"/>
+
+  <circle cx="206" cy="186" r="80" fill="url(#highlightGradient)" opacity="0.6"/>
+</svg>
