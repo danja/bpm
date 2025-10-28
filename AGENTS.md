@@ -19,26 +19,26 @@ This document records the long‑lived “agents” (people, automations, or AI 
   - Works closely with the BPM Detector Coordinator to bind streams of BPM updates to widgets.
 
 - **Application Logic Engineer**  
-  - Implements the Coordinator, Results Aggregator, and state management (Bloc/Riverpod).  
-  - Ensures compute-heavy work stays off the UI thread and that partial results stream correctly.
+  - Owns the coordinator + repository layer (`lib/src/core/bpm_detector_coordinator.dart`, `lib/src/repository/bpm_repository.dart`), keeping isolates wired to the registry configured in `lib/src/app.dart`.  
+  - Manages algorithm gating/timeout handling (current isolate hard stop at 5s) and keeps streaming states accurate when only a subset of algorithms is active.
 
 - **Audio Platform Engineer**  
   - Manages microphone/file input, audio session lifecycle, buffer management, and platform-specific permissions.  
   - Integrates audio plugins (`record`, `just_audio`, etc.) and abstracts them behind a portable interface.
 
 - **DSP & Algorithms Engineer**  
-  - Authors the algorithm interface, registry, and implementations (Onset, Autocorrelation, FFT, Wavelet).  
-  - Maintains signal preprocessing utilities, validates accuracy targets, and designs consensus weighting.
+  - Authors the algorithm interface and implementations (Onset, Autocorrelation, FFT, Wavelet), ensuring `AlgorithmRegistry` ships with a viable mix (today only `SimpleOnsetAlgorithm` is live; `AutocorrelationAlgorithm` times out, `FftSpectrumAlgorithm` throws an ARM “Illegal instruction”, and `WaveletEnergyAlgorithm` is compute-bound).  
+  - Triages re-enabling those paths, calibrates confidence/consensus weighting once restored, and maintains the supporting signal preprocessing utilities.
 
 - **Performance & Reliability Engineer**  
-  - Profiles latency/memory, enforces compute isolation (`compute`, isolates, or native FFI helpers).  
-  - Owns benchmarking harnesses, synthetic signal generators, and regression alerts for accuracy.
+  - Profiles latency/memory across the isolate pipeline (notably `_runAlgorithmsInIsolate` with a 5s timeout) and enforces compute isolation on target Android hardware.  
+  - Owns benchmarking harnesses, synthetic signal generators, and regression alerts, partnering with DSP to resolve the ARM crash and slow-algorithm regressions before features ship.
 
 ## Quality & Knowledge Agents
 
 - **Test & QA Engineer**  
   - Drives the test pyramid (unit, integration, golden, performance) with >85% coverage goal.  
-  - Curates audio fixtures (silence, noise, real songs) and defines acceptance criteria for algorithms.
+  - Curates audio fixtures (silence, noise, real songs) and expands accuracy/performance checks so disabled algorithms can re-enter service with measurable acceptance gates.
 
 - **Documentation & Developer Experience**  
   - Maintains README, ARCHITECTURE, ALGORITHMS, TESTING, USER_GUIDE, and agent/progress logs.  

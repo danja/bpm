@@ -93,7 +93,10 @@ class RecordAudioStreamSource implements AudioStreamSource {
           );
         },
         onDone: () {
-          _logger.warning('Audio stream DONE - this should not happen during recording!', source: 'Audio');
+          _logger.error('Audio stream ended unexpectedly!', source: 'Audio');
+          _controller?.addError(
+            Exception('Audio stream ended unexpectedly. This may be due to system resources or permissions.'),
+          );
         },
         cancelOnError: false,
       );

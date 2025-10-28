@@ -1,12 +1,19 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:isolate';
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
+import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
+import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
+import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
+import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/core/consensus_engine.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/utils/app_logger.dart';
+import 'package:flutter/foundation.dart';
 
 class BpmDetectorCoordinator {
   BpmDetectorCoordinator({
@@ -47,6 +54,7 @@ class BpmDetectorCoordinator {
     var latestReadings = const <BpmReading>[];
     ConsensusResult? latestConsensus;
     var receivedFirstFrame = false;
+    var bufferReady = false; // Track if buffer has ever been filled
 
     // Add a timeout check to detect if audio stream isn't flowing
     Timer? timeoutTimer;
@@ -90,14 +98,23 @@ class BpmDetectorCoordinator {
         elapsedSincePreview += frameDuration;
         _accumulateWaveform(waveform, frame.samples, _scopeSampleLimit);
 
-        while (bufferDuration > bufferWindow && buffer.isNotEmpty) {
-          final removed = buffer.removeFirst();
-          bufferDuration -= removed.duration;
+        // Check if buffer is full for the first time
+        if (!bufferReady && bufferDuration >= bufferWindow) {
+          bufferReady = true;
+          _logger.info('Buffer ready! ${bufferDuration.inSeconds}s of audio collected', source: 'Coordinator');
+        }
+
+        // Remove old frames to maintain sliding window (only after buffer is ready)
+        if (bufferReady) {
+          while (bufferDuration > bufferWindow && buffer.isNotEmpty) {
+            final removed = buffer.removeFirst();
+            bufferDuration -= removed.duration;
+          }
         }
 
         if (elapsedSincePreview >= _scopePreviewInterval) {
           elapsedSincePreview = Duration.zero;
-          final previewStatus = bufferDuration < bufferWindow
+          final previewStatus = !bufferReady
               ? DetectionStatus.buffering
               : currentStatus;
           controller.add(
@@ -110,14 +127,15 @@ class BpmDetectorCoordinator {
           );
         }
 
-        if (bufferDuration < bufferWindow) {
+        if (!bufferReady) {
           final prevStatus = currentStatus;
           currentStatus = DetectionStatus.buffering;
 
-          // Log every 2 seconds or on status change
+          // Log progress every second
           final secondsBuffered = bufferDuration.inSeconds;
-          if (prevStatus != DetectionStatus.buffering || secondsBuffered % 2 == 0) {
-            _logger.info('Status: buffering (${bufferDuration.inSeconds}s/${bufferWindow.inSeconds}s)', source: 'Coordinator');
+          final totalSeconds = bufferWindow.inSeconds;
+          if (prevStatus != DetectionStatus.buffering || frame.sequence % 10 == 0) {
+            _logger.info('Buffering: ${secondsBuffered}s / ${totalSeconds}s (${buffer.length} frames)', source: 'Coordinator');
           }
           return;
         }
@@ -144,25 +162,42 @@ class BpmDetectorCoordinator {
         final windowFrames =
             buffer.map((entry) => entry.frame).toList(growable: false);
 
-        // Run algorithms with individual error handling
-        final readings = <BpmReading?>[];
-        for (final algorithm in registry.algorithms) {
-          try {
-            _logger.info('Running ${algorithm.label}...', source: 'Coordinator');
-            final reading = await algorithm.analyze(
-              window: windowFrames,
+        // Debug: Log audio data stats
+        final totalSamples = windowFrames.fold<int>(0, (sum, frame) => sum + frame.samples.length);
+        final totalDuration = (totalSamples / streamConfig.sampleRate).toStringAsFixed(1);
+        _logger.info('Audio buffer: ${windowFrames.length} frames, ${totalSamples} samples (${totalDuration}s)', source: 'Coordinator');
+
+        // Run algorithms in background with timeout to avoid hanging
+        _logger.info('Starting background analysis...', source: 'Coordinator');
+
+        List<BpmReading> readings = [];
+        try {
+          readings = await compute(
+            _runAlgorithmsInIsolate,
+            _AlgorithmParams(
+              frames: windowFrames,
               context: context,
-            );
-            if (reading != null) {
-              _logger.info('${algorithm.label} -> ${reading.bpm.toStringAsFixed(1)} BPM (confidence: ${reading.confidence.toStringAsFixed(2)})', source: 'Coordinator');
-            } else {
-              _logger.info('${algorithm.label} -> no result', source: 'Coordinator');
-            }
-            readings.add(reading);
-          } catch (e, stack) {
-            _logger.error('${algorithm.label} failed: $e', source: 'Coordinator');
-            _logger.debug('Stack trace: $stack', source: 'Coordinator');
-            // Continue with other algorithms
+              algorithmIds: registry.algorithms.map((a) => a.id).toList(),
+            ),
+          ).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              _logger.warning('Algorithm timeout after 5s, using partial results', source: 'Coordinator');
+              return <BpmReading>[];
+            },
+          );
+        } catch (e) {
+          _logger.error('Algorithm error: $e', source: 'Coordinator');
+          readings = [];
+        }
+
+        _logger.info('Background analysis complete: ${readings.length} readings', source: 'Coordinator');
+
+        if (readings.isEmpty) {
+          _logger.warning('No readings returned from algorithms!', source: 'Coordinator');
+        } else {
+          for (final reading in readings) {
+            _logger.info('${reading.algorithmName} -> ${reading.bpm.toStringAsFixed(1)} BPM (confidence: ${reading.confidence.toStringAsFixed(2)})', source: 'Coordinator');
           }
         }
 
@@ -171,8 +206,11 @@ class BpmDetectorCoordinator {
         latestReadings = filtered;
         latestConsensus = consensus;
 
-        final bpmStr = consensus != null ? consensus.bpm.toStringAsFixed(1) : 'none';
-        _logger.info('Analysis complete: ${filtered.length} readings, consensus=$bpmStr', source: 'Coordinator');
+        if (consensus != null) {
+          _logger.info('✓ CONSENSUS: ${consensus.bpm.toStringAsFixed(1)} BPM (confidence: ${consensus.confidence.toStringAsFixed(2)})', source: 'Coordinator');
+        } else {
+          _logger.warning('No consensus - need more readings (have ${filtered.length})', source: 'Coordinator');
+        }
         currentStatus = DetectionStatus.streamingResults;
         controller.add(
           BpmSummary(
@@ -231,4 +269,66 @@ List<double> _waveformSnapshot(Queue<double> source) {
     return const [];
   }
   return List<double>.from(source);
+}
+
+// Isolate support for background algorithm execution
+class _AlgorithmParams {
+  const _AlgorithmParams({
+    required this.frames,
+    required this.context,
+    required this.algorithmIds,
+  });
+
+  final List<AudioFrame> frames;
+  final DetectionContext context;
+  final List<String> algorithmIds;
+}
+
+// Top-level function for isolate (must be top-level or static)
+Future<List<BpmReading>> _runAlgorithmsInIsolate(_AlgorithmParams params) async {
+  final results = <BpmReading>[];
+
+  // Debug: Check if we have audio data
+  final totalSamples = params.frames.fold<int>(0, (sum, frame) => sum + frame.samples.length);
+  if (totalSamples == 0) {
+    return results; // No audio data
+  }
+
+  for (final algorithmId in params.algorithmIds) {
+    try {
+      BpmDetectionAlgorithm? algorithm;
+
+      // Instantiate algorithm based on ID
+      switch (algorithmId) {
+        case 'simple_onset':
+          algorithm = SimpleOnsetAlgorithm();
+          break;
+        case 'autocorrelation':
+          algorithm = AutocorrelationAlgorithm();
+          break;
+        case 'fft_spectrum':
+          algorithm = FftSpectrumAlgorithm();
+          break;
+        case 'wavelet_energy':
+          algorithm = WaveletEnergyAlgorithm();
+          break;
+        default:
+          continue;
+      }
+
+      final reading = await algorithm.analyze(
+        window: params.frames,
+        context: params.context,
+      );
+
+      if (reading != null) {
+        results.add(reading);
+      }
+    } catch (e) {
+      // Skip failed algorithms - can't log in isolate
+      continue;
+    }
+  }
+
+  return results;
 }

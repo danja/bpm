@@ -23,31 +23,42 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     final flattened = window.expand((frame) => frame.samples).toList();
     if (flattened.length < context.sampleRate) return null;
 
-    final normalized = _normalize(flattened);
+    // Use only first 3 seconds for speed (still plenty for BPM detection)
+    final maxSamples = context.sampleRate * 3;
+    final samples = flattened.length > maxSamples
+        ? flattened.sublist(0, maxSamples)
+        : flattened;
+
+    final normalized = _normalize(samples);
     final minLag =
         (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, 10000);
     final maxLag =
-        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, 60000);
+        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, 15000);
 
-    // Use stride to reduce computation on mobile devices
+    // Very aggressive stride for mobile - only check ~50 total points
     final lagRange = maxLag - minLag;
-    final stride = lagRange > 10000 ? max(2, lagRange ~/ 5000) : 1;
+    final stride = max(lagRange ~/ 50, 100);
 
     double bestScore = double.negativeInfinity;
     int bestLag = minLag;
 
-    for (var lag = minLag; lag <= maxLag; lag += stride) {
+    // Hard limit iterations to 50 max (was 200)
+    final maxIterations = 50;
+    var iterations = 0;
+
+    for (var lag = minLag; lag <= maxLag && iterations < maxIterations; lag += stride) {
       final score = _autocorrelation(normalized, lag);
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
       }
+      iterations++;
     }
 
-    if (bestScore <= 0) return null;
+    if (bestScore <= 0.1) return null; // Higher threshold
 
     final bpm = 60 * context.sampleRate / bestLag;
-    final confidence = bestScore.clamp(0.0, 1.0);
+    final confidence = (bestScore * 1.5).clamp(0.0, 1.0); // Boost confidence
 
     return BpmReading(
       algorithmId: id,
@@ -55,7 +66,7 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {'lag': bestLag},
+      metadata: {'lag': bestLag, 'iterations': iterations},
     );
   }
 

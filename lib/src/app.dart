@@ -2,7 +2,6 @@ import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
-import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/audio/record_audio_stream_source.dart';
 import 'package:bpm/src/core/bpm_detector_coordinator.dart';
@@ -20,10 +19,10 @@ class BpmApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final registry = AlgorithmRegistry(
       [
-        SimpleOnsetAlgorithm(),
-        AutocorrelationAlgorithm(),
+        SimpleOnsetAlgorithm(), // Fast energy-based detection (now more sensitive)
+        // AutocorrelationAlgorithm(), // Still too slow for this device, times out
         // FftSpectrumAlgorithm(), // Disabled: causes "Illegal instruction" on ARM devices
-        WaveletEnergyAlgorithm(),
+        // WaveletEnergyAlgorithm(), // Disabled: too compute-intensive
       ],
     );
 

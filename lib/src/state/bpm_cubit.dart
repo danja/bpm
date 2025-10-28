@@ -34,7 +34,7 @@ class BpmCubit extends Cubit<BpmState> {
             state.copyWith(
               status: summary.status,
               readings: summary.readings,
-              consensus: summary.consensus,
+              consensus: summary.consensus ?? state.consensus, // Keep previous if null
               message: summary.message,
               history: _updatedHistory(state.history, summary),
               previewSamples: summary.previewSamples,
