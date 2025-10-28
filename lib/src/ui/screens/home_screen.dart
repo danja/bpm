@@ -5,6 +5,7 @@ import 'package:bpm/src/ui/widgets/algorithm_readings_list.dart';
 import 'package:bpm/src/ui/widgets/audio_oscilloscope.dart';
 import 'package:bpm/src/ui/widgets/bpm_summary_card.dart';
 import 'package:bpm/src/ui/widgets/bpm_trend_sparkline.dart';
+import 'package:bpm/src/ui/widgets/app_console.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -19,26 +20,44 @@ class HomeScreen extends StatelessWidget {
           appBar: AppBar(
             title: const Text('Real-time BPM Detector'),
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(16),
-            child: ListView(
-              children: [
-                AudioOscilloscope(
-                  samples: state.previewSamples,
-                  status: state.status,
+          body: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 16,
+                  bottom: 60, // Space for console
                 ),
-                const SizedBox(height: 12),
-                BpmSummaryCard(state: state),
-                const SizedBox(height: 12),
-                if (state.history.length >= 2) ...[
-                  BpmTrendSparkline(history: state.history),
-                  const SizedBox(height: 12),
-                ],
-                AlgorithmReadingsList(state: state),
-                const SizedBox(height: 12),
-                _StatusBanner(state: state),
-              ],
-            ),
+                child: ListView(
+                  children: [
+                    AudioOscilloscope(
+                      samples: state.previewSamples,
+                      status: state.status,
+                    ),
+                    const SizedBox(height: 12),
+                    BpmSummaryCard(state: state),
+                    const SizedBox(height: 12),
+                    if (state.history.length >= 2) ...[
+                      BpmTrendSparkline(history: state.history),
+                      const SizedBox(height: 12),
+                    ],
+                    AlgorithmReadingsList(state: state),
+                    const SizedBox(height: 12),
+                    _StatusBanner(state: state),
+                  ],
+                ),
+              ),
+              // Console at bottom
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: const AppConsole(
+                  initiallyExpanded: true,
+                ),
+              ),
+            ],
           ),
           floatingActionButton: _DetectionFab(state: state),
         );

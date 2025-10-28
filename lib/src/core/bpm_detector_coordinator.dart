@@ -6,6 +6,7 @@ import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/core/consensus_engine.dart';
 import 'package:bpm/src/models/bpm_models.dart';
+import 'package:bpm/src/utils/app_logger.dart';
 
 class BpmDetectorCoordinator {
   BpmDetectorCoordinator({
@@ -21,12 +22,15 @@ class BpmDetectorCoordinator {
   final ConsensusEngine consensusEngine;
   final Duration bufferWindow;
   final Duration analysisInterval;
+  final _logger = AppLogger();
 
   Stream<BpmSummary> start({
     required AudioStreamConfig streamConfig,
     required DetectionContext context,
   }) async* {
-    await audioSource.start(streamConfig);
+    _logger.info('BpmDetectorCoordinator.start() called', source: 'Coordinator');
+    _logger.info('Stream config: ${streamConfig.sampleRate}Hz, ${streamConfig.channels} channels', source: 'Coordinator');
+
     yield BpmSummary(
       status: DetectionStatus.listening,
       readings: const [],
@@ -42,9 +46,34 @@ class BpmDetectorCoordinator {
     var currentStatus = DetectionStatus.listening;
     var latestReadings = const <BpmReading>[];
     ConsensusResult? latestConsensus;
+    var receivedFirstFrame = false;
 
+    // Add a timeout check to detect if audio stream isn't flowing
+    Timer? timeoutTimer;
+    timeoutTimer = Timer(const Duration(seconds: 3), () {
+      if (!receivedFirstFrame) {
+        _logger.error('No audio data received after 3 seconds', source: 'Coordinator');
+        controller.addError(
+          Exception(
+            'No audio data received after 3 seconds. '
+            'This may indicate a problem with microphone access or audio configuration.',
+          ),
+        );
+      }
+    });
+
+    // IMPORTANT: Subscribe to frames BEFORE starting audio to avoid missing data
+    _logger.info('Subscribing to audio frames...', source: 'Coordinator');
     final frameSub = audioSource.frames(streamConfig).listen(
       (frame) async {
+        // Mark that we've received the first frame
+        if (!receivedFirstFrame) {
+          receivedFirstFrame = true;
+          timeoutTimer?.cancel();
+          final durationMs = (frame.samples.length / frame.sampleRate * 1000).round();
+          _logger.info('First audio frame received: ${frame.samples.length} samples @ ${frame.sampleRate}Hz = ${durationMs}ms', source: 'Coordinator');
+        }
+
         final frameDuration = Duration(
           microseconds: (frame.samples.length / frame.sampleRate *
                   Duration.microsecondsPerSecond)
@@ -82,7 +111,14 @@ class BpmDetectorCoordinator {
         }
 
         if (bufferDuration < bufferWindow) {
+          final prevStatus = currentStatus;
           currentStatus = DetectionStatus.buffering;
+
+          // Log every 2 seconds or on status change
+          final secondsBuffered = bufferDuration.inSeconds;
+          if (prevStatus != DetectionStatus.buffering || secondsBuffered % 2 == 0) {
+            _logger.info('Status: buffering (${bufferDuration.inSeconds}s/${bufferWindow.inSeconds}s)', source: 'Coordinator');
+          }
           return;
         }
 
@@ -90,7 +126,12 @@ class BpmDetectorCoordinator {
           return;
         }
         elapsedSinceLastAnalysis = Duration.zero;
+
+        if (currentStatus != DetectionStatus.analyzing) {
+          _logger.info('Buffer full! Starting analysis...', source: 'Coordinator');
+        }
         currentStatus = DetectionStatus.analyzing;
+        _logger.info('Status: analyzing', source: 'Coordinator');
         controller.add(
           BpmSummary(
             status: DetectionStatus.analyzing,
@@ -102,20 +143,36 @@ class BpmDetectorCoordinator {
 
         final windowFrames =
             buffer.map((entry) => entry.frame).toList(growable: false);
-        final readings = await Future.wait(
-          registry.algorithms.map(
-            (algorithm) => algorithm.analyze(
+
+        // Run algorithms with individual error handling
+        final readings = <BpmReading?>[];
+        for (final algorithm in registry.algorithms) {
+          try {
+            _logger.info('Running ${algorithm.label}...', source: 'Coordinator');
+            final reading = await algorithm.analyze(
               window: windowFrames,
               context: context,
-            ),
-          ),
-        );
+            );
+            if (reading != null) {
+              _logger.info('${algorithm.label} -> ${reading.bpm.toStringAsFixed(1)} BPM (confidence: ${reading.confidence.toStringAsFixed(2)})', source: 'Coordinator');
+            } else {
+              _logger.info('${algorithm.label} -> no result', source: 'Coordinator');
+            }
+            readings.add(reading);
+          } catch (e, stack) {
+            _logger.error('${algorithm.label} failed: $e', source: 'Coordinator');
+            _logger.debug('Stack trace: $stack', source: 'Coordinator');
+            // Continue with other algorithms
+          }
+        }
 
         final filtered = readings.whereType<BpmReading>().toList();
         final consensus = consensusEngine.combine(filtered);
         latestReadings = filtered;
         latestConsensus = consensus;
 
+        final bpmStr = consensus != null ? consensus.bpm.toStringAsFixed(1) : 'none';
+        _logger.info('Analysis complete: ${filtered.length} readings, consensus=$bpmStr', source: 'Coordinator');
         currentStatus = DetectionStatus.streamingResults;
         controller.add(
           BpmSummary(
@@ -126,11 +183,22 @@ class BpmDetectorCoordinator {
           ),
         );
       },
-      onError: controller.addError,
+      onError: (error) {
+        _logger.error('Frame stream error: $error', source: 'Coordinator');
+        controller.addError(error);
+      },
       cancelOnError: true,
     );
 
+    // Now start the audio source - frames will flow to our listener above
+    _logger.info('Starting audio source...', source: 'Coordinator');
+    await audioSource.start(streamConfig);
+    _logger.info('Audio source started', source: 'Coordinator');
+
     yield* controller.stream;
+    if (timeoutTimer.isActive) {
+      timeoutTimer.cancel();
+    }
     await frameSub.cancel();
   }
 }

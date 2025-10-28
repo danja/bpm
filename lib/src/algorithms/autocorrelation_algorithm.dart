@@ -27,12 +27,16 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     final minLag =
         (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, 10000);
     final maxLag =
-        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, 200000);
+        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, 60000);
+
+    // Use stride to reduce computation on mobile devices
+    final lagRange = maxLag - minLag;
+    final stride = lagRange > 10000 ? max(2, lagRange ~/ 5000) : 1;
 
     double bestScore = double.negativeInfinity;
     int bestLag = minLag;
 
-    for (var lag = minLag; lag <= maxLag; lag++) {
+    for (var lag = minLag; lag <= maxLag; lag += stride) {
       final score = _autocorrelation(normalized, lag);
       if (score > bestScore) {
         bestScore = score;

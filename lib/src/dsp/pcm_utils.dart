@@ -10,7 +10,12 @@ class PcmUtils {
   }) {
     final buffer = ByteData.view(bytes.buffer);
     final samples = <double>[];
-    for (var i = 0; i < buffer.lengthInBytes; i += 2 * channels) {
+
+    // Calculate how many complete samples we can read (2 bytes per sample per channel)
+    final bytesPerSample = 2 * channels;
+    final completeBytes = (buffer.lengthInBytes ~/ bytesPerSample) * bytesPerSample;
+
+    for (var i = 0; i < completeBytes; i += bytesPerSample) {
       // Mixdown all channels if more than mono.
       var mixed = 0.0;
       for (var channel = 0; channel < channels; channel++) {
