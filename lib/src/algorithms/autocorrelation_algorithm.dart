@@ -2,9 +2,20 @@ import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
 class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
+  AutocorrelationAlgorithm({
+    this.maxAnalysisSeconds = 6,
+    this.targetSampleRate = 11025,
+    this.minConfidenceThreshold = 0.2,
+  });
+
+  final int maxAnalysisSeconds;
+  final int targetSampleRate;
+  final double minConfidenceThreshold;
+
   @override
   String get id => 'autocorrelation';
 
@@ -21,44 +32,73 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   }) async {
     if (window.isEmpty) return null;
     final flattened = window.expand((frame) => frame.samples).toList();
-    if (flattened.length < context.sampleRate) return null;
+    if (flattened.length < context.sampleRate ~/ 2) {
+      return null;
+    }
 
-    // Use only first 3 seconds for speed (still plenty for BPM detection)
-    final maxSamples = context.sampleRate * 3;
-    final samples = flattened.length > maxSamples
-        ? flattened.sublist(0, maxSamples)
-        : flattened;
+    final maxSamples = min(flattened.length, context.sampleRate * maxAnalysisSeconds);
+    var samples = flattened.sublist(0, maxSamples);
 
-    final normalized = _normalize(samples);
-    final minLag =
-        (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, 10000);
-    final maxLag =
-        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, 15000);
+    final decimationFactor =
+        max(1, (context.sampleRate / targetSampleRate).ceil());
+    final effectiveSampleRate =
+        max(1, (context.sampleRate / decimationFactor).round());
 
-    // Very aggressive stride for mobile - only check ~50 total points
-    final lagRange = maxLag - minLag;
-    final stride = max(lagRange ~/ 50, 100);
+    if (decimationFactor > 1) {
+      samples = SignalUtils.downsample(samples, decimationFactor);
+    }
 
-    double bestScore = double.negativeInfinity;
-    int bestLag = minLag;
+    if (samples.length < effectiveSampleRate) {
+      return null;
+    }
 
-    // Hard limit iterations to 50 max (was 200)
-    final maxIterations = 50;
-    var iterations = 0;
+    samples = SignalUtils.normalize(SignalUtils.removeMean(samples));
+    if (samples.every((value) => value == 0)) {
+      return null;
+    }
 
-    for (var lag = minLag; lag <= maxLag && iterations < maxIterations; lag += stride) {
-      final score = _autocorrelation(normalized, lag);
+    final theoreticalMinLag =
+        (effectiveSampleRate * 60 / context.maxBpm).floor();
+    final theoreticalMaxLag =
+        (effectiveSampleRate * 60 / context.minBpm).ceil();
+
+    final minLag = max(1, theoreticalMinLag);
+    final maxLag = min(samples.length - 1, theoreticalMaxLag);
+    if (maxLag - minLag < 3) {
+      return null;
+    }
+
+    final coarseStride = max(1, (maxLag - minLag) ~/ 160);
+    var bestScore = double.negativeInfinity;
+    var bestLag = minLag;
+    var evaluations = 0;
+
+    for (var lag = minLag; lag <= maxLag; lag += coarseStride) {
+      final score = SignalUtils.autocorrelation(samples, lag);
+      evaluations++;
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
       }
-      iterations++;
     }
 
-    if (bestScore <= 0.1) return null; // Higher threshold
+    final refineStart = max(minLag, bestLag - coarseStride * 2);
+    final refineEnd = min(maxLag, bestLag + coarseStride * 2);
+    for (var lag = refineStart; lag <= refineEnd; lag++) {
+      final score = SignalUtils.autocorrelation(samples, lag);
+      evaluations++;
+      if (score > bestScore) {
+        bestScore = score;
+        bestLag = lag;
+      }
+    }
 
-    final bpm = 60 * context.sampleRate / bestLag;
-    final confidence = (bestScore * 1.5).clamp(0.0, 1.0); // Boost confidence
+    final confidence = bestScore.clamp(0.0, 1.0);
+    if (confidence < minConfidenceThreshold) {
+      return null;
+    }
+
+    final bpm = 60 * effectiveSampleRate / bestLag;
 
     return BpmReading(
       algorithmId: id,
@@ -66,23 +106,13 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {'lag': bestLag, 'iterations': iterations},
+      metadata: {
+        'lag': bestLag,
+        'evaluations': evaluations,
+        'coarseStride': coarseStride,
+        'decimation': decimationFactor,
+        'analysisSeconds': samples.length / effectiveSampleRate,
+      },
     );
-  }
-
-  double _autocorrelation(List<double> samples, int lag) {
-    var sum = 0.0;
-    for (var i = 0; i < samples.length - lag; i++) {
-      sum += samples[i] * samples[i + lag];
-    }
-    return sum / (samples.length - lag);
-  }
-
-  List<double> _normalize(List<double> samples) {
-    final maxValue = samples.map((e) => e.abs()).reduce(max);
-    if (maxValue == 0) {
-      return List.filled(samples.length, 0);
-    }
-    return samples.map((value) => value / maxValue).toList();
   }
 }

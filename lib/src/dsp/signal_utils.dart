@@ -83,4 +83,34 @@ class SignalUtils {
 
     return bestLag;
   }
+
+  static List<double> removeMean(List<double> samples) {
+    if (samples.isEmpty) {
+      return const [];
+    }
+    final mean = samples.reduce((a, b) => a + b) / samples.length;
+    return samples.map((value) => value - mean).toList();
+  }
+
+  static List<double> downsample(List<double> samples, int factor) {
+    if (factor <= 1 || samples.length <= factor) {
+      return List<double>.from(samples);
+    }
+    final result = <double>[];
+    var sum = 0.0;
+    var count = 0;
+    for (final value in samples) {
+      sum += value;
+      count++;
+      if (count == factor) {
+        result.add(sum / count);
+        sum = 0;
+        count = 0;
+      }
+    }
+    if (count > 0) {
+      result.add(sum / count);
+    }
+    return result;
+  }
 }

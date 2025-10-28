@@ -25,13 +25,11 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     required DetectionContext context,
   }) async {
     if (window.isEmpty) {
-      print('[SimpleOnset] Window is empty');
       return null;
     }
 
     final flattened = window.expand((frame) => frame.samples).toList();
     if (flattened.isEmpty) {
-      print('[SimpleOnset] Flattened samples empty');
       return null;
     }
 
@@ -39,14 +37,11 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
         max(1, (context.sampleRate * (frameMillis / 1000)).round());
     final envelope = _shortTimeEnergy(flattened, frameSize);
     if (envelope.length < 4) {
-      print('[SimpleOnset] Envelope too short: ${envelope.length}');
       return null;
     }
 
     final peaks = _detectPeaks(envelope);
-    print('[SimpleOnset] Detected ${peaks.length} peaks from ${envelope.length} envelope frames');
     if (peaks.length < 2) {
-      print('[SimpleOnset] Not enough peaks (need 2, got ${peaks.length})');
       return null;
     }
 
@@ -58,35 +53,28 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     final avgIntervalMs =
         intervals.reduce((a, b) => a + b) / intervals.length.toDouble();
     if (avgIntervalMs == 0) {
-      print('[SimpleOnset] Average interval is zero');
       return null;
     }
 
     var bpm = 60000 / avgIntervalMs;
 
     // Handle harmonic detection - if BPM is too high, try dividing by 2, 3, or 4
-    var harmonicDivisor = 1;
     if (bpm > context.maxBpm) {
       for (var divisor in [2, 3, 4]) {
         final adjusted = bpm / divisor;
         if (adjusted >= context.minBpm && adjusted <= context.maxBpm) {
-          print('[SimpleOnset] Detected ${divisor}x harmonic: ${bpm.toStringAsFixed(1)} → ${adjusted.toStringAsFixed(1)} BPM');
           bpm = adjusted;
-          harmonicDivisor = divisor;
           break;
         }
       }
     }
 
     if (bpm < context.minBpm || bpm > context.maxBpm) {
-      print('[SimpleOnset] BPM ${bpm.toStringAsFixed(1)} out of range (${context.minBpm}-${context.maxBpm})');
       return null;
     }
 
     final variance = _variance(intervals);
     final confidence = (1 / (1 + variance / 1000)).clamp(0.0, 1.0);
-
-    print('[SimpleOnset] ✓ SUCCESS: ${bpm.toStringAsFixed(1)} BPM (confidence: ${confidence.toStringAsFixed(2)})');
 
     return BpmReading(
       algorithmId: id,

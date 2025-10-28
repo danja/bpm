@@ -1,5 +1,4 @@
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
-import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';

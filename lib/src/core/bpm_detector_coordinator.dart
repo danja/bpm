@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:isolate';
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
@@ -164,8 +163,12 @@ class BpmDetectorCoordinator {
 
         // Debug: Log audio data stats
         final totalSamples = windowFrames.fold<int>(0, (sum, frame) => sum + frame.samples.length);
-        final totalDuration = (totalSamples / streamConfig.sampleRate).toStringAsFixed(1);
-        _logger.info('Audio buffer: ${windowFrames.length} frames, ${totalSamples} samples (${totalDuration}s)', source: 'Coordinator');
+        final totalDuration =
+            (totalSamples / streamConfig.sampleRate).toStringAsFixed(1);
+        _logger.info(
+          'Audio buffer: ${windowFrames.length} frames, ${totalSamples} samples ($totalDuration s)',
+          source: 'Coordinator',
+        );
 
         // Run algorithms in background with timeout to avoid hanging
         _logger.info('Starting background analysis...', source: 'Coordinator');
