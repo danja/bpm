@@ -50,3 +50,5 @@ This document records the long‑lived “agents” (people, automations, or AI 
 2. Agents file is the source of truth for responsibilities; update when roles change or new automation is introduced.  
 3. When handing off work, note outstanding risks, artifacts, and verification steps in both AGENTS and PROGRESS logs.  
 4. Agents must reference PLAN-01 requirements when proposing scope or architectural changes.
+
+ the build-upload-test cycle takes a long time so plan ahead and try hard to make every new revision count
