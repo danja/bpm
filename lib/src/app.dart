@@ -1,5 +1,8 @@
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
+import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
+import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/audio/record_audio_stream_source.dart';
@@ -16,21 +19,27 @@ class BpmApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final registry = AlgorithmRegistry(
-      [
-        SimpleOnsetAlgorithm(), // Fast energy-based detection (now more sensitive)
-        // AutocorrelationAlgorithm(), // Still too slow for this device, times out
-        // FftSpectrumAlgorithm(), // Disabled: causes "Illegal instruction" on ARM devices
-        // WaveletEnergyAlgorithm(), // Disabled: too compute-intensive
-      ],
-    );
+    const enableAutocorrelation = true;
+    const enableFftSpectrum = true;
+    final algorithms = <BpmDetectionAlgorithm>[
+      SimpleOnsetAlgorithm(), // Fast energy-based detection (now more sensitive)
+    ];
+    if (enableFftSpectrum) {
+      algorithms.add(FftSpectrumAlgorithm());
+    }
+    if (enableAutocorrelation) {
+      algorithms.add(AutocorrelationAlgorithm());
+    }
+
+    final registry = AlgorithmRegistry(algorithms);
 
     final audioSource = RecordAudioStreamSource();
     final coordinator = BpmDetectorCoordinator(
       audioSource: audioSource,
       registry: registry,
       consensusEngine: const ConsensusEngine(),
-      bufferWindow: const Duration(seconds: 6), // Reduced from 10s to work around buffering issue
+      bufferWindow:
+          const Duration(seconds: 6), // Balanced latency vs stability window
     );
 
     final repository = BpmRepository(

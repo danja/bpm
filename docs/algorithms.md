@@ -40,12 +40,12 @@ This document summarizes the signal-processing approaches currently implemented 
 
 ## FFT Magnitude Spectrum
 
-- **Implementation**: `lib/src/algorithms/fft_spectrum_algorithm.dart`
+- **Implementation**: `lib/src/algorithms/fft_spectrum_algorithm.dart` (runtime FFT in `lib/src/dsp/fft_utils.dart`)
 - **Idea**: Frequency-domain approach that identifies dominant low-frequency peaks in the magnitude spectrum of the energy envelope.
 - **Key Steps**:
   - Normalize samples, zero-pad to the next power-of-two >= window length.
   - Apply Hann window to reduce spectral leakage.
-  - Run real FFT (`fftea`) and compute magnitudes from complex bins.
+  - Downsample to ~16 kHz, Hann window, and run the in-app radix-2 FFT helper (`FftUtils.magnitudeSpectrum`) to recover the low-frequency beat envelope.
   - Translate bin index to BPM (`frequency * 60`), track strongest magnitude inside `[minBpm, maxBpm]`.
   - Confidence compares peak magnitude with average spectral energy.
 - **References**:

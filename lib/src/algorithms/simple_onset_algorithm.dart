@@ -49,14 +49,16 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     for (var i = 1; i < peaks.length; i++) {
       intervals.add((peaks[i] - peaks[i - 1]) * frameMillis.toDouble());
     }
-
-    final avgIntervalMs =
-        intervals.reduce((a, b) => a + b) / intervals.length.toDouble();
-    if (avgIntervalMs == 0) {
+    if (intervals.isEmpty) {
       return null;
     }
 
-    var bpm = 60000 / avgIntervalMs;
+    final medianIntervalMs = _median(intervals);
+    if (medianIntervalMs == 0) {
+      return null;
+    }
+
+    var bpm = 60000 / medianIntervalMs;
 
     // Handle harmonic detection - if BPM is too high, try dividing by 2, 3, or 4
     if (bpm > context.maxBpm) {
@@ -73,8 +75,8 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final variance = _variance(intervals);
-    final confidence = (1 / (1 + variance / 1000)).clamp(0.0, 1.0);
+    final variance = _variance(intervals, medianIntervalMs);
+    final confidence = (1 / (1 + variance / 500)).clamp(0.0, 1.0);
 
     return BpmReading(
       algorithmId: id,
@@ -123,11 +125,19 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     return values.map((value) => value / maxValue).toList();
   }
 
-  double _variance(List<double> values) {
+  double _variance(List<double> values, double center) {
     if (values.length < 2) return 0;
-    final mean = values.reduce((a, b) => a + b) / values.length;
     final sumSquares =
-        values.fold(0.0, (sum, value) => sum + pow(value - mean, 2));
+        values.fold(0.0, (sum, value) => sum + pow(value - center, 2));
     return sumSquares / (values.length - 1);
+  }
+
+  double _median(List<double> values) {
+    final sorted = List<double>.from(values)..sort();
+    final mid = sorted.length ~/ 2;
+    if (sorted.length.isOdd) {
+      return sorted[mid];
+    }
+    return (sorted[mid - 1] + sorted[mid]) / 2;
   }
 }

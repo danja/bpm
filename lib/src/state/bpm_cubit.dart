@@ -13,6 +13,8 @@ class BpmCubit extends Cubit<BpmState> {
   final _logger = AppLogger();
   StreamSubscription<BpmSummary>? _subscription;
   static const _maxHistoryPoints = 12;
+  static const _consensusBlendAlpha = 0.35;
+  static const _historySmoothingWindow = 3;
 
   Future<void> start() async {
     _logger.info('User pressed Start button', source: 'App');
@@ -30,16 +32,25 @@ class BpmCubit extends Cubit<BpmState> {
     );
 
     _subscription = _repository.listen().listen(
-          (summary) => emit(
-            state.copyWith(
-              status: summary.status,
-              readings: summary.readings,
-              consensus: summary.consensus ?? state.consensus, // Keep previous if null
-              message: summary.message,
-              history: _updatedHistory(state.history, summary),
-              previewSamples: summary.previewSamples,
-            ),
-          ),
+          (summary) {
+            final blendedConsensus = summary.consensus != null
+                ? _smoothedConsensus(state.consensus, summary.consensus!)
+                : state.consensus;
+            emit(
+              state.copyWith(
+                status: summary.status,
+                readings: summary.readings,
+                consensus: blendedConsensus,
+                message: summary.message,
+                history: _updatedHistory(
+                  state.history,
+                  summary.status,
+                  summary.consensus != null ? blendedConsensus : null,
+                ),
+                previewSamples: summary.previewSamples,
+              ),
+            );
+          },
           onError: (error, stackTrace) {
             _logger.error('BPM detection error: $error', source: 'App');
             emit(
@@ -68,19 +79,68 @@ class BpmCubit extends Cubit<BpmState> {
 
   List<BpmHistoryPoint> _updatedHistory(
     List<BpmHistoryPoint> current,
-    BpmSummary summary,
+    DetectionStatus status,
+    ConsensusResult? consensus,
   ) {
-    final consensus = summary.consensus;
-    if (consensus == null ||
-        summary.status != DetectionStatus.streamingResults) {
+    if (consensus == null || status != DetectionStatus.streamingResults) {
       return current;
     }
 
+    final smoothedBpm = _smoothedBpm(current, consensus.bpm);
+    final smoothedConfidence = _smoothedConfidence(current, consensus.confidence);
+
     final next = List<BpmHistoryPoint>.from(current)
-      ..add(BpmHistoryPoint.fromConsensus(consensus));
+      ..add(
+        BpmHistoryPoint(
+          bpm: smoothedBpm,
+          confidence: smoothedConfidence,
+          timestamp: DateTime.now().toUtc(),
+        ),
+      );
     if (next.length > _maxHistoryPoints) {
       next.removeRange(0, next.length - _maxHistoryPoints);
     }
     return next;
+  }
+
+  ConsensusResult _smoothedConsensus(
+    ConsensusResult? previous,
+    ConsensusResult incoming,
+  ) {
+    if (previous == null) {
+      return incoming;
+    }
+    final alpha = _consensusBlendAlpha;
+    final bpm = previous.bpm + alpha * (incoming.bpm - previous.bpm);
+    final confidence =
+        previous.confidence + alpha * (incoming.confidence - previous.confidence);
+    final clampedConfidence = confidence.clamp(0.0, 1.0).toDouble();
+    return ConsensusResult(
+      bpm: bpm,
+      confidence: clampedConfidence,
+      weights: incoming.weights,
+    );
+  }
+
+  double _smoothedBpm(List<BpmHistoryPoint> history, double candidate) {
+    final recentCount = _historySmoothingWindow - 1;
+    final startIndex = history.length > recentCount ? history.length - recentCount : 0;
+    final values = history.isEmpty
+        ? <double>[]
+        : history.sublist(startIndex).map((point) => point.bpm).toList();
+    values.add(candidate);
+    final total = values.fold<double>(0, (sum, value) => sum + value);
+    return total / values.length;
+  }
+
+  double _smoothedConfidence(List<BpmHistoryPoint> history, double candidate) {
+    final recentCount = _historySmoothingWindow - 1;
+    final startIndex = history.length > recentCount ? history.length - recentCount : 0;
+    final values = history.isEmpty
+        ? <double>[]
+        : history.sublist(startIndex).map((point) => point.confidence).toList();
+    values.add(candidate);
+    final total = values.fold<double>(0, (sum, value) => sum + value);
+    return (total / values.length).clamp(0.0, 1.0).toDouble();
   }
 }

@@ -7,9 +7,9 @@ import 'package:bpm/src/models/bpm_models.dart';
 
 class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   AutocorrelationAlgorithm({
-    this.maxAnalysisSeconds = 6,
-    this.targetSampleRate = 11025,
-    this.minConfidenceThreshold = 0.2,
+    this.maxAnalysisSeconds = 4,
+    this.targetSampleRate = 8000,
+    this.minConfidenceThreshold = 0.25,
   });
 
   final int maxAnalysisSeconds;
@@ -36,7 +36,8 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final maxSamples = min(flattened.length, context.sampleRate * maxAnalysisSeconds);
+    final maxSamples =
+        min(flattened.length, context.sampleRate * maxAnalysisSeconds);
     var samples = flattened.sublist(0, maxSamples);
 
     final decimationFactor =
@@ -68,10 +69,11 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final coarseStride = max(1, (maxLag - minLag) ~/ 160);
+    final coarseStride = max(1, (maxLag - minLag) ~/ 100);
     var bestScore = double.negativeInfinity;
     var bestLag = minLag;
     var evaluations = 0;
+    const maxEvaluations = 400;
 
     for (var lag = minLag; lag <= maxLag; lag += coarseStride) {
       final score = SignalUtils.autocorrelation(samples, lag);
@@ -79,6 +81,9 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
+      }
+      if (evaluations >= maxEvaluations) {
+        break;
       }
     }
 
@@ -90,6 +95,9 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
+      }
+      if (evaluations >= maxEvaluations) {
+        break;
       }
     }
 
