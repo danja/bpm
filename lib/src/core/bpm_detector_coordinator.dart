@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
@@ -10,6 +11,7 @@ import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/core/consensus_engine.dart';
+import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/utils/app_logger.dart';
 import 'package:flutter/foundation.dart';
@@ -29,6 +31,10 @@ class BpmDetectorCoordinator {
   final Duration bufferWindow;
   final Duration analysisInterval;
   final _logger = AppLogger();
+  bool _waveletRunning = false;
+  DateTime? _lastWaveletRun;
+  List<BpmReading> _latestReadings = const [];
+  ConsensusResult? _latestConsensus;
 
   Stream<BpmSummary> start({
     required AudioStreamConfig streamConfig,
@@ -53,8 +59,8 @@ class BpmDetectorCoordinator {
     var elapsedSinceLastAnalysis = Duration.zero;
     var elapsedSincePreview = Duration.zero;
     var currentStatus = DetectionStatus.listening;
-    var latestReadings = const <BpmReading>[];
-    ConsensusResult? latestConsensus;
+    _latestReadings = const <BpmReading>[];
+    _latestConsensus = null;
     var receivedFirstFrame = false;
     var bufferReady = false; // Track if buffer has ever been filled
 
@@ -131,8 +137,8 @@ class BpmDetectorCoordinator {
           controller.add(
             BpmSummary(
               status: previewStatus,
-              readings: latestReadings,
-              consensus: latestConsensus,
+              readings: _latestReadings,
+              consensus: _latestConsensus,
               previewSamples: _waveformSnapshot(waveform),
             ),
           );
@@ -168,8 +174,8 @@ class BpmDetectorCoordinator {
         controller.add(
           BpmSummary(
             status: DetectionStatus.analyzing,
-            readings: latestReadings,
-            consensus: latestConsensus,
+            readings: _latestReadings,
+            consensus: _latestConsensus,
             previewSamples: _waveformSnapshot(waveform),
           ),
         );
@@ -190,6 +196,15 @@ class BpmDetectorCoordinator {
         // Run algorithms in background with timeout to avoid hanging
         _logger.info('Starting background analysis...', source: 'Coordinator');
 
+        final waveletEnabled =
+            registry.algorithms.any((algorithm) => algorithm.id == 'wavelet_energy');
+        final algorithmIds = waveletEnabled
+            ? registry.algorithms
+                .where((algorithm) => algorithm.id != 'wavelet_energy')
+                .map((algorithm) => algorithm.id)
+                .toList()
+            : registry.algorithms.map((algorithm) => algorithm.id).toList();
+
         List<BpmReading> readings = [];
         try {
           readings = await compute(
@@ -197,7 +212,7 @@ class BpmDetectorCoordinator {
             _AlgorithmParams(
               frames: windowFrames,
               context: context,
-              algorithmIds: registry.algorithms.map((a) => a.id).toList(),
+              algorithmIds: algorithmIds,
             ),
           ).timeout(
             const Duration(seconds: 5),
@@ -230,8 +245,8 @@ class BpmDetectorCoordinator {
 
         final filtered = readings.whereType<BpmReading>().toList();
         final consensus = consensusEngine.combine(filtered);
-        latestReadings = filtered;
-        latestConsensus = consensus;
+        _latestReadings = filtered;
+        _latestConsensus = consensus;
 
         if (consensus != null) {
           _logger.info(
@@ -251,6 +266,17 @@ class BpmDetectorCoordinator {
             previewSamples: _waveformSnapshot(waveform),
           ),
         );
+
+        if (waveletEnabled) {
+          _scheduleWaveletAnalysis(
+            frames: windowFrames,
+            context: context,
+            baseReadings: filtered,
+            baseConsensus: consensus,
+            controller: controller,
+            waveforms: _waveformSnapshot(waveform),
+          );
+        }
       },
       onError: (error) {
         _logger.error('Frame stream error: $error', source: 'Coordinator');
@@ -270,6 +296,142 @@ class BpmDetectorCoordinator {
     }
     await frameSub.cancel();
   }
+
+  void _scheduleWaveletAnalysis({
+    required List<AudioFrame> frames,
+    required DetectionContext context,
+    required List<BpmReading> baseReadings,
+    required ConsensusResult? baseConsensus,
+    required StreamController<BpmSummary> controller,
+    required List<double> waveforms,
+  }) {
+    final now = DateTime.now();
+    if (_waveletRunning) {
+      return;
+    }
+    if (_lastWaveletRun != null &&
+        now.difference(_lastWaveletRun!) < const Duration(seconds: 2)) {
+      return;
+    }
+
+    final waveletInput = _prepareWaveletInput(
+      frames,
+      sampleRate: context.sampleRate,
+      targetDuration: const Duration(seconds: 8),
+    );
+    if (waveletInput.frames.isEmpty) {
+      return;
+    }
+    _waveletRunning = true;
+    _lastWaveletRun = now;
+    _logger.info(
+      'Wavelet scheduled with ${waveletInput.frames.first.samples.length} samples @ ${waveletInput.sampleRate}Hz',
+      source: 'WaveletScheduler',
+    );
+
+    final params = _AlgorithmParams(
+      frames: waveletInput.frames,
+      context: _adjustDetectionContext(context, waveletInput.sampleRate),
+      algorithmIds: const ['wavelet_energy'],
+    );
+
+    Future<void>.delayed(const Duration(milliseconds: 150), () async {
+      try {
+        final readings = await compute(
+          _runAlgorithmsInIsolate,
+          params,
+        ).timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => <BpmReading>[],
+        );
+
+        if (readings.isEmpty) {
+          return;
+        }
+
+        final merged = [
+          ...baseReadings.where((reading) => reading.algorithmId != 'wavelet_energy'),
+          ...readings,
+        ];
+
+        _latestReadings = merged;
+        _latestConsensus = consensusEngine.combine(merged) ?? baseConsensus;
+
+        if (!controller.isClosed) {
+          controller.add(
+            BpmSummary(
+              status: DetectionStatus.streamingResults,
+              readings: merged,
+              consensus: _latestConsensus,
+              previewSamples: waveforms,
+            ),
+          );
+        }
+      } catch (error) {
+        _logger.warning('Wavelet analysis failed: $error', source: 'Coordinator');
+      } finally {
+        _waveletRunning = false;
+      }
+    });
+  }
+}
+
+({List<AudioFrame> frames, int sampleRate}) _prepareWaveletInput(
+  List<AudioFrame> frames, {
+  required int sampleRate,
+  required Duration targetDuration,
+}) {
+  if (frames.isEmpty) {
+    return (frames: const [], sampleRate: sampleRate);
+  }
+
+  final minSamples = sampleRate * 3;
+  final maxSamples = math.max(sampleRate * targetDuration.inSeconds, minSamples);
+  final collected = <double>[];
+  var gathered = 0;
+
+  for (var i = frames.length - 1; i >= 0 && gathered < maxSamples; i--) {
+    final frame = frames[i];
+    final remaining = maxSamples - gathered;
+    if (frame.samples.length <= remaining) {
+      collected.insertAll(0, frame.samples);
+      gathered += frame.samples.length;
+    } else {
+      final start = frame.samples.length - remaining;
+      collected.insertAll(0, frame.samples.sublist(start));
+      gathered = maxSamples;
+    }
+  }
+
+  if (collected.length < minSamples) {
+    return (frames: const [], sampleRate: sampleRate);
+  }
+
+  final targetSampleRate = 4000;
+  final downsampleFactor = math.max(1, (sampleRate / targetSampleRate).round());
+  final effectiveSampleRate = (sampleRate / downsampleFactor).round();
+  final downsampled = SignalUtils.downsample(collected, downsampleFactor);
+
+  final frame = AudioFrame(
+    samples: downsampled,
+    sampleRate: effectiveSampleRate,
+    channels: 1,
+    sequence: frames.last.sequence,
+  );
+
+  return (frames: [frame], sampleRate: effectiveSampleRate);
+}
+
+DetectionContext _adjustDetectionContext(DetectionContext base, int sampleRate) {
+  if (sampleRate == base.sampleRate) {
+    return base;
+  }
+  return DetectionContext(
+    sampleRate: sampleRate,
+    minBpm: base.minBpm,
+    maxBpm: base.maxBpm,
+    windowDuration: base.windowDuration,
+  );
 }
 
 class _BufferedFrame {

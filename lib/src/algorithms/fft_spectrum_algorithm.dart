@@ -8,11 +8,14 @@ import 'package:bpm/src/models/bpm_models.dart';
 
 class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
   FftSpectrumAlgorithm({
-    this.maxWindowSeconds = 4,
-    this.targetSampleRate = 16000,
+    this.maxWindowSeconds = 6,
+    this.targetSampleRate = 400,
+    this.minFftSize = 2048,
   });
+
   final int maxWindowSeconds;
   final int targetSampleRate;
+  final int minFftSize;
 
   @override
   String get id => 'fft_spectrum';
@@ -56,7 +59,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       envelope.length,
       effectiveSampleRate * maxWindowSeconds,
     );
-    if (maxSamples < 256) {
+    if (maxSamples < minFftSize ~/ 2) {
       return null;
     }
 
@@ -66,7 +69,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final fftSize = _boundedPowerOfTwo(trimmed.length);
+    final fftSize = _boundedPowerOfTwo(trimmed.length, minFftSize);
 
     final padded = List<double>.filled(fftSize, 0)
       ..setRange(0, min(trimmed.length, fftSize), trimmed);
@@ -131,8 +134,8 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
   }
 }
 
-int _boundedPowerOfTwo(int sampleCount) {
-  final desired = max(1024, sampleCount);
+int _boundedPowerOfTwo(int sampleCount, int minSize) {
+  final desired = max(minSize, sampleCount);
   final nextPower = SignalUtils.nextPowerOfTwo(desired);
   return min(8192, nextPower);
 }
