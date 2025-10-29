@@ -33,14 +33,18 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
+    final preprocessed = _preprocessSamples(flattened);
+
     final frameSize =
         max(1, (context.sampleRate * (frameMillis / 1000)).round());
-    final envelope = _shortTimeEnergy(flattened, frameSize);
+    final envelope = _shortTimeEnergy(preprocessed, frameSize);
     if (envelope.length < 4) {
       return null;
     }
 
-    final peaks = _detectPeaks(envelope);
+    final smoothed = _smooth(envelope, max(3, envelope.length ~/ 60));
+
+    final peaks = _detectPeaks(smoothed);
     if (peaks.length < 2) {
       return null;
     }
@@ -104,15 +108,27 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
 
   List<int> _detectPeaks(List<double> envelope) {
     final peaks = <int>[];
-    // Very low threshold for maximum sensitivity
-    const threshold = 0.25; // Was 0.6, then 0.4
+    final avg = envelope.reduce((a, b) => a + b) / envelope.length;
+    final variance = envelope.fold<double>(0, (sum, value) => sum + pow(value - avg, 2));
+    final std = sqrt((variance / envelope.length).clamp(0.0, double.infinity));
+    final threshold = (avg + std * 0.3).clamp(0.15, 0.6);
 
-    for (var i = 1; i < envelope.length - 1; i++) {
-      if (envelope[i] > envelope[i - 1] &&
-          envelope[i] > envelope[i + 1] &&
-          envelope[i] > threshold) {
+    for (var i = 2; i < envelope.length - 2; i++) {
+      final current = envelope[i];
+      if (current > threshold &&
+          current >= envelope[i - 1] &&
+          current >= envelope[i + 1] &&
+          current > envelope[i - 2] &&
+          current > envelope[i + 2]) {
         peaks.add(i);
       }
+    }
+
+    if (peaks.length < 2) {
+      final indexed = List.generate(envelope.length, (index) => (index, envelope[index]))
+        ..sort((a, b) => b.$2.compareTo(a.$2));
+      final fallback = indexed.take(4).map((entry) => entry.$1).toList()..sort();
+      return fallback.length >= 2 ? fallback : peaks;
     }
     return peaks;
   }
@@ -139,5 +155,36 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return sorted[mid];
     }
     return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  List<double> _preprocessSamples(List<double> samples) {
+    if (samples.isEmpty) return const [];
+    const alpha = 0.975;
+    final result = List<double>.filled(samples.length, 0);
+    var previous = samples.first;
+    for (var i = 0; i < samples.length; i++) {
+      final current = samples[i] - alpha * previous;
+      result[i] = current;
+      previous = samples[i];
+    }
+    return result;
+  }
+
+  List<double> _smooth(List<double> values, int window) {
+    if (values.isEmpty || window <= 1) {
+      return List<double>.from(values);
+    }
+    final size = min(window, values.length);
+    final smoothed = List<double>.filled(values.length, 0);
+    var sum = 0.0;
+    for (var i = 0; i < values.length; i++) {
+      sum += values[i];
+      if (i >= size) {
+        sum -= values[i - size];
+      }
+      final currentWindow = min(i + 1, size);
+      smoothed[i] = sum / currentWindow;
+    }
+    return _normalize(smoothed);
   }
 }

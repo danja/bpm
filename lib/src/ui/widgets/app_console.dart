@@ -11,8 +11,8 @@ class AppConsole extends StatefulWidget {
   const AppConsole({
     super.key,
     this.initiallyExpanded = false,
-    this.collapsedHeight = 48,
-    this.expandedHeight = 300,
+    this.collapsedHeight = 34,
+    this.expandedHeight = 210,
   });
 
   @override

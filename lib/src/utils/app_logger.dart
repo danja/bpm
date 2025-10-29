@@ -54,7 +54,7 @@ class AppLogger {
   final _logs = <LogEntry>[];
   final _controller = StreamController<List<LogEntry>>.broadcast();
 
-  static const int _maxLogs = 500; // Keep last 500 logs
+  static const int _maxLogs = 150; // Keep last 150 logs
 
   /// Stream of log entries
   Stream<List<LogEntry>> get logStream => _controller.stream;
@@ -68,6 +68,10 @@ class AppLogger {
     LogLevel level = LogLevel.info,
     String? source,
   }) {
+    if (level == LogLevel.debug) {
+      return; // Skip verbose debug logs in UI console
+    }
+
     final entry = LogEntry(
       timestamp: DateTime.now(),
       level: level,

@@ -11,13 +11,6 @@ class BpmSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final consensus = state.consensus;
     final textTheme = Theme.of(context).textTheme;
-    final previous = state.history.length >= 2
-        ? state.history[state.history.length - 2]
-        : null;
-    final delta = previous != null && consensus != null
-        ? consensus.bpm - previous.bpm
-        : null;
-
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -25,6 +18,8 @@ class BpmSummaryCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            ..._algorithmRows(context),
+            const Divider(height: 20),
             Text('Consensus BPM', style: textTheme.titleMedium),
             const SizedBox(height: 4),
             if (consensus == null)
@@ -58,33 +53,75 @@ class BpmSummaryCard extends StatelessWidget {
                   minHeight: 6,
                 ),
               ),
-            if (previous != null && consensus != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Row(
-                  children: [
-                    Text(
-                      'Previous ${previous.bpm.toStringAsFixed(1)} BPM',
-                      style: textTheme.bodyMedium,
-                    ),
-                    const Spacer(),
-                    if (delta != null)
-                      Text(
-                        delta >= 0
-                            ? '+${delta.toStringAsFixed(1)}'
-                            : delta.toStringAsFixed(1),
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: delta >= 0
-                              ? Colors.green.shade600
-                              : Colors.red.shade400,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _algorithmRows(BuildContext context) {
+    const algorithms = [
+      ('simple_onset', 'Onset Energy'),
+      ('autocorrelation', 'Autocorrelation'),
+      ('fft_spectrum', 'FFT Spectrum'),
+      ('wavelet_energy', 'Wavelet Energy'),
+    ];
+
+    final readingById = {
+      for (final reading in state.readings) reading.algorithmId: reading
+    };
+
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return algorithms
+        .map(
+          (entry) {
+            final reading = readingById[entry.$1];
+            final bpmText = reading != null
+                ? '${reading.bpm.toStringAsFixed(1)} BPM'
+                : '— BPM';
+            final confidence = reading?.confidence ?? 0;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          entry.$2,
+                          style: textTheme.titleSmall,
+                        ),
+                      ),
+                      Text(
+                        bpmText,
+                        style: textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: confidence.clamp(0.0, 1.0),
+                    minHeight: 4,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Confidence ${(confidence * 100).toStringAsFixed(0)}%',
+                    style: textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            );
+          },
+        )
+        .toList();
   }
 }

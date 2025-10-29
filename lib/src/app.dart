@@ -4,6 +4,7 @@ import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
+import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/audio/record_audio_stream_source.dart';
 import 'package:bpm/src/core/bpm_detector_coordinator.dart';
@@ -21,6 +22,7 @@ class BpmApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const enableAutocorrelation = true;
     const enableFftSpectrum = true;
+    const enableWavelet = true;
     final algorithms = <BpmDetectionAlgorithm>[
       SimpleOnsetAlgorithm(), // Fast energy-based detection (now more sensitive)
     ];
@@ -29,6 +31,9 @@ class BpmApp extends StatelessWidget {
     }
     if (enableAutocorrelation) {
       algorithms.add(AutocorrelationAlgorithm());
+    }
+    if (enableWavelet) {
+      algorithms.add(WaveletEnergyAlgorithm(levels: 3));
     }
 
     final registry = AlgorithmRegistry(algorithms);
@@ -39,7 +44,7 @@ class BpmApp extends StatelessWidget {
       registry: registry,
       consensusEngine: const ConsensusEngine(),
       bufferWindow:
-          const Duration(seconds: 6), // Balanced latency vs stability window
+          const Duration(seconds: 4), // Shorter window for faster updates
     );
 
     final repository = BpmRepository(
@@ -49,7 +54,7 @@ class BpmApp extends StatelessWidget {
         sampleRate: 44100,
         minBpm: 50,
         maxBpm: 200,
-        windowDuration: Duration(seconds: 10),
+        windowDuration: Duration(seconds: 6),
       ),
     );
 

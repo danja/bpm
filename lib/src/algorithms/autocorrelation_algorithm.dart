@@ -9,12 +9,10 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   AutocorrelationAlgorithm({
     this.maxAnalysisSeconds = 4,
     this.targetSampleRate = 8000,
-    this.minConfidenceThreshold = 0.25,
   });
 
   final int maxAnalysisSeconds;
   final int targetSampleRate;
-  final double minConfidenceThreshold;
 
   @override
   String get id => 'autocorrelation';
@@ -102,9 +100,6 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final confidence = bestScore.clamp(0.0, 1.0);
-    if (confidence < minConfidenceThreshold) {
-      return null;
-    }
 
     final bpm = 60 * effectiveSampleRate / bestLag;
 

@@ -1,7 +1,6 @@
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/state/bpm_state.dart';
-import 'package:bpm/src/ui/widgets/algorithm_readings_list.dart';
 import 'package:bpm/src/ui/widgets/audio_oscilloscope.dart';
 import 'package:bpm/src/ui/widgets/bpm_summary_card.dart';
 import 'package:bpm/src/ui/widgets/bpm_trend_sparkline.dart';
@@ -42,8 +41,6 @@ class HomeScreen extends StatelessWidget {
                       BpmTrendSparkline(history: state.history),
                       const SizedBox(height: 12),
                     ],
-                    AlgorithmReadingsList(state: state),
-                    const SizedBox(height: 12),
                     _StatusBanner(state: state),
                   ],
                 ),
@@ -54,7 +51,7 @@ class HomeScreen extends StatelessWidget {
                 right: 0,
                 bottom: 0,
                 child: const AppConsole(
-                  initiallyExpanded: true,
+                  initiallyExpanded: false,
                 ),
               ),
             ],

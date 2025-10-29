@@ -1,7 +1,7 @@
 import 'package:bpm/src/models/bpm_models.dart';
 
 class ConsensusEngine {
-  const ConsensusEngine({this.minConfidence = 0.3});
+  const ConsensusEngine({this.minConfidence = 0.1});
 
   final double minConfidence;
 

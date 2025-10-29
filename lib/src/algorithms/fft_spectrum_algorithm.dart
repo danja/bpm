@@ -8,12 +8,9 @@ import 'package:bpm/src/models/bpm_models.dart';
 
 class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
   FftSpectrumAlgorithm({
-    this.minMagnitudeRatio = 0.25,
     this.maxWindowSeconds = 4,
     this.targetSampleRate = 16000,
   });
-
-  final double minMagnitudeRatio;
   final int maxWindowSeconds;
   final int targetSampleRate;
 
@@ -49,18 +46,30 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       samples = SignalUtils.downsample(samples, decimation);
     }
 
-    final maxSamples = min(
-      samples.length,
-      effectiveSampleRate * maxWindowSeconds,
-    );
-    if (maxSamples < 512) {
+    final envelope = _energyEnvelope(samples);
+    if (envelope.isEmpty ||
+        envelope.every((value) => value == 0 || value.isNaN)) {
       return null;
     }
 
-    final fftSize = _boundedPowerOfTwo(maxSamples);
+    final maxSamples = min(
+      envelope.length,
+      effectiveSampleRate * maxWindowSeconds,
+    );
+    if (maxSamples < 256) {
+      return null;
+    }
+
+    final trimmed =
+        envelope.length > maxSamples ? envelope.sublist(0, maxSamples) : envelope;
+    if (trimmed.every((value) => value == 0)) {
+      return null;
+    }
+
+    final fftSize = _boundedPowerOfTwo(trimmed.length);
 
     final padded = List<double>.filled(fftSize, 0)
-      ..setRange(0, min(samples.length, fftSize), samples);
+      ..setRange(0, min(trimmed.length, fftSize), trimmed);
 
     final windowed = SignalUtils.applyHannWindow(padded);
     final spectrum = FftUtils.magnitudeSpectrum(windowed);
@@ -72,13 +81,21 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     var bestBpm = 0.0;
     var bestMagnitude = 0.0;
 
-    for (var i = 1; i < spectrum.magnitudes.length; i++) {
+    final minIndex = max(
+      1,
+      (context.minBpm / 60 / freqResolution).ceil(),
+    );
+    final maxIndex = min(
+      spectrum.magnitudes.length - 1,
+      (context.maxBpm / 60 / freqResolution).floor(),
+    );
+    if (maxIndex <= minIndex) {
+      return null;
+    }
+
+    for (var i = minIndex; i <= maxIndex; i++) {
       final frequencyHz = i * freqResolution;
       final bpm = frequencyHz * 60;
-      if (bpm < context.minBpm || bpm > context.maxBpm) {
-        continue;
-      }
-
       final magnitude = spectrum.magnitudes[i];
       if (magnitude > bestMagnitude) {
         bestMagnitude = magnitude;
@@ -90,17 +107,14 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final totalMagnitude =
-        spectrum.magnitudes.fold<double>(0, (sum, mag) => sum + mag);
+    final totalMagnitude = spectrum.magnitudes
+        .sublist(minIndex, maxIndex + 1)
+        .fold<double>(0, (sum, mag) => sum + mag);
     final averageMagnitude = totalMagnitude == 0
         ? 1
-        : totalMagnitude / spectrum.magnitudes.length;
+        : totalMagnitude / (maxIndex - minIndex + 1);
     final confidence =
         (bestMagnitude / averageMagnitude).clamp(0.0, 1.0);
-
-    if (confidence < minMagnitudeRatio) {
-      return null;
-    }
 
     return BpmReading(
       algorithmId: id,
@@ -121,4 +135,22 @@ int _boundedPowerOfTwo(int sampleCount) {
   final desired = max(1024, sampleCount);
   final nextPower = SignalUtils.nextPowerOfTwo(desired);
   return min(8192, nextPower);
+}
+
+List<double> _energyEnvelope(List<double> samples) {
+  if (samples.isEmpty) {
+    return const [];
+  }
+
+  const alpha = 0.1;
+  var running = samples.first.abs();
+  final envelope = List<double>.filled(samples.length, 0);
+  for (var i = 0; i < samples.length; i++) {
+    final magnitude = samples[i].abs();
+    running = alpha * magnitude + (1 - alpha) * running;
+    envelope[i] = running;
+  }
+
+  final withoutDc = SignalUtils.removeMean(envelope);
+  return SignalUtils.normalize(withoutDc);
 }
