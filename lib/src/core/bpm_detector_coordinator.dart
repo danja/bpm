@@ -35,6 +35,7 @@ class BpmDetectorCoordinator {
   DateTime? _lastWaveletRun;
   List<BpmReading> _latestReadings = const [];
   ConsensusResult? _latestConsensus;
+  BpmReading? _lastWaveletReading;
 
   Stream<BpmSummary> start({
     required AudioStreamConfig streamConfig,
@@ -244,13 +245,16 @@ class BpmDetectorCoordinator {
         }
 
         final filtered = readings.whereType<BpmReading>().toList();
-        final consensus = consensusEngine.combine(filtered);
-        _latestReadings = filtered;
-        _latestConsensus = consensus;
+        final displayReadings = List<BpmReading>.from(filtered);
+        if (_lastWaveletReading != null) {
+          displayReadings.add(_lastWaveletReading!);
+        }
+        _latestReadings = displayReadings;
+        _latestConsensus = consensusEngine.combine(displayReadings);
 
-        if (consensus != null) {
+        if (_latestConsensus != null) {
           _logger.info(
-              '✓ CONSENSUS: ${consensus.bpm.toStringAsFixed(1)} BPM (confidence: ${consensus.confidence.toStringAsFixed(2)})',
+              '✓ CONSENSUS: ${_latestConsensus!.bpm.toStringAsFixed(1)} BPM (confidence: ${_latestConsensus!.confidence.toStringAsFixed(2)})',
               source: 'Coordinator');
         } else {
           _logger.warning(
@@ -261,8 +265,8 @@ class BpmDetectorCoordinator {
         controller.add(
           BpmSummary(
             status: DetectionStatus.streamingResults,
-            readings: filtered,
-            consensus: consensus,
+            readings: _latestReadings,
+            consensus: _latestConsensus,
             previewSamples: _waveformSnapshot(waveform),
           ),
         );
@@ -272,7 +276,7 @@ class BpmDetectorCoordinator {
             frames: windowFrames,
             context: context,
             baseReadings: filtered,
-            baseConsensus: consensus,
+            baseConsensus: _latestConsensus,
             controller: controller,
             waveforms: _waveformSnapshot(waveform),
           );
@@ -354,8 +358,20 @@ class BpmDetectorCoordinator {
           ...readings,
         ];
 
-        _latestReadings = merged;
-        _latestConsensus = consensusEngine.combine(merged) ?? baseConsensus;
+        BpmReading? waveletReading;
+        for (final reading in readings) {
+          if (reading.algorithmId == 'wavelet_energy') {
+            waveletReading = reading;
+            break;
+          }
+        }
+        if (waveletReading != null) {
+          _lastWaveletReading = waveletReading;
+        }
+
+        final mergedWithWavelet = List<BpmReading>.from(merged);
+        _latestReadings = mergedWithWavelet;
+        _latestConsensus = consensusEngine.combine(mergedWithWavelet) ?? baseConsensus;
 
         if (!controller.isClosed) {
           controller.add(

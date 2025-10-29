@@ -42,7 +42,7 @@ class BpmApp extends StatelessWidget {
     final coordinator = BpmDetectorCoordinator(
       audioSource: audioSource,
       registry: registry,
-      consensusEngine: const ConsensusEngine(),
+      consensusEngine: ConsensusEngine(),
       bufferWindow:
           const Duration(seconds: 4), // Shorter window for faster updates
     );
