@@ -48,6 +48,15 @@ class BpmDetectorCoordinator {
         'Stream config: ${streamConfig.sampleRate}Hz, ${streamConfig.channels} channels',
         source: 'Coordinator');
 
+    // Reset all state for fresh start
+    consensusEngine.reset();
+    _latestReadings = const <BpmReading>[];
+    _latestConsensus = null;
+    _lastWaveletReading = null;
+    _waveletRunning = false;
+    _lastWaveletRun = null;
+    _logger.info('Consensus engine and coordinator state reset', source: 'Coordinator');
+
     yield BpmSummary(
       status: DetectionStatus.listening,
       readings: const [],
@@ -61,8 +70,6 @@ class BpmDetectorCoordinator {
     var elapsedSinceLastAnalysis = Duration.zero;
     var elapsedSincePreview = Duration.zero;
     var currentStatus = DetectionStatus.listening;
-    _latestReadings = const <BpmReading>[];
-    _latestConsensus = null;
     var receivedFirstFrame = false;
     var bufferReady = false; // Track if buffer has ever been filled
 

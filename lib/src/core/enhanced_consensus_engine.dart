@@ -88,6 +88,7 @@ class EnhancedConsensusEngine implements ConsensusInterface {
   }
 
   /// Reset the consensus state (e.g., when starting new analysis)
+  @override
   void reset() {
     _history.clear();
     _currentConsensus = null;

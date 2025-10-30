@@ -21,6 +21,11 @@ class ConsensusEngine implements ConsensusInterface {
   double? _previousBpm;
 
   @override
+  void reset() {
+    _previousBpm = null;
+  }
+
+  @override
   ConsensusResult? combine(List<BpmReading> readings) {
     if (readings.isEmpty) return _fallback();
 

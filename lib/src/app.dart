@@ -8,7 +8,7 @@ import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/audio/record_audio_stream_source.dart';
 import 'package:bpm/src/core/bpm_detector_coordinator.dart';
-import 'package:bpm/src/core/enhanced_consensus_engine.dart';
+import 'package:bpm/src/core/robust_consensus_engine.dart';
 import 'package:bpm/src/repository/bpm_repository.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/ui/screens/home_screen.dart';
@@ -42,12 +42,13 @@ class BpmApp extends StatelessWidget {
     final coordinator = BpmDetectorCoordinator(
       audioSource: audioSource,
       registry: registry,
-      consensusEngine: EnhancedConsensusEngine(
-        historySize: 15, // Track last 15 readings
-        outlierThresholdMAD: 2.5, // Reject outliers beyond 2.5 MAD units
-        convergenceThreshold: 2.0, // Consider stable when within 2 BPM
-        minSmoothingFactor: 0.15, // Heavy smoothing when stable
-        maxSmoothingFactor: 0.5, // Responsive when changing
+      consensusEngine: RobustConsensusEngine(
+        historySize: 10, // Track last 10 readings per algorithm
+        minReadingsForOutlierDetection: 3, // Need 3 readings before rejecting outliers
+        algorithmOutlierThreshold: 8.0, // Reject if >8 BPM from algorithm's own median
+        clusterTolerance: 3.0, // Algorithms within 3 BPM cluster together
+        minClusterSize: 2, // Need 2+ algorithms agreeing
+        smoothingFactor: 0.25, // Moderate smoothing
       ),
       bufferWindow:
           const Duration(seconds: 4), // Shorter window for faster updates
