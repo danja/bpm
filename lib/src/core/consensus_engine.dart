@@ -6,11 +6,15 @@ class ConsensusEngine {
   ConsensusEngine({
     this.minConfidence = 0.05,
     this.halfTempoTolerance = 0.03,
-    this.smoothingFactor = 0.3,
+    this.clusterToleranceBpm = 1.5,
+    this.clusterMinWeight = 0.25,
+    this.smoothingFactor = 0.2,
   });
 
   final double minConfidence;
   final double halfTempoTolerance;
+  final double clusterToleranceBpm;
+  final double clusterMinWeight;
   final double smoothingFactor;
 
   double? _previousBpm;
@@ -30,19 +34,32 @@ class ConsensusEngine {
       for (final reading in eligible) reading.algorithmId: _heuristicWeight(reading)
     };
 
-    final provisional = _weightedMean(eligible, initialWeights);
-    final refinedWeights = _reweightOutliers(eligible, initialWeights, provisional);
-    final consensusBpm = _weightedMean(eligible, refinedWeights);
+    final cluster = _selectCluster(eligible, initialWeights);
+
+    Map<String, double> finalWeights;
+    double consensusBpm;
+    if (cluster != null && cluster.totalWeight >= clusterMinWeight) {
+      finalWeights = cluster.weights;
+      consensusBpm = _weightedMean(cluster.members, cluster.weights);
+    } else {
+      final reweighted = _reweightOutliers(
+        eligible,
+        initialWeights,
+        _weightedMean(eligible, initialWeights),
+      );
+      finalWeights = reweighted;
+      consensusBpm = _weightedMean(eligible, reweighted);
+    }
 
     final smoothedBpm = _smooth(consensusBpm);
-    final aggregateConfidence = _aggregateConfidence(refinedWeights);
+    final aggregateConfidence = _aggregateConfidence(finalWeights);
 
     _previousBpm = smoothedBpm;
 
     return ConsensusResult(
       bpm: smoothedBpm,
       confidence: aggregateConfidence,
-      weights: refinedWeights,
+      weights: finalWeights,
     );
   }
 
@@ -124,18 +141,12 @@ class ConsensusEngine {
     double mean,
   ) {
     final result = Map<String, double>.from(weights);
-    final deviations = readings.map((reading) => (reading.bpm - mean).abs()).toList();
-    final maxDeviation = deviations.isEmpty ? 0 : deviations.reduce(math.max);
-    if (maxDeviation <= 3) {
-      return result;
-    }
-    for (var i = 0; i < readings.length; i++) {
-      final reading = readings[i];
-      final deviation = deviations[i];
-      if (deviation > 6) {
-        result.update(reading.algorithmId, (value) => value * 0.4);
-      } else if (deviation > 4) {
-        result.update(reading.algorithmId, (value) => value * 0.7);
+    for (final reading in readings) {
+      final deviation = (reading.bpm - mean).abs();
+      if (deviation > 8) {
+        result.update(reading.algorithmId, (value) => value * 0.3);
+      } else if (deviation > 5) {
+        result.update(reading.algorithmId, (value) => value * 0.6);
       }
     }
     return result;
@@ -153,7 +164,72 @@ class ConsensusEngine {
       return 0;
     }
     final total = weights.values.fold<double>(0, (sum, value) => sum + value);
-    final normalized = total / weights.length;
-    return normalized.clamp(0.0, 1.0);
+    return total.clamp(0.0, 1.0);
   }
+
+  _Cluster? _selectCluster(
+    List<BpmReading> readings,
+    Map<String, double> weights,
+  ) {
+    _Cluster? bestCluster;
+    for (var i = 0; i < readings.length; i++) {
+      final anchor = readings[i];
+      final tolerance = math.max(clusterToleranceBpm, anchor.bpm * halfTempoTolerance);
+      final members = <BpmReading>[];
+      final clusterWeights = <String, double>{};
+      var totalWeight = 0.0;
+      for (var j = 0; j < readings.length; j++) {
+        final candidate = readings[j];
+        final diff = (candidate.bpm - anchor.bpm).abs();
+        if (diff <= tolerance) {
+          final weight = weights[candidate.algorithmId] ?? 0;
+          members.add(candidate);
+          clusterWeights[candidate.algorithmId] = weight;
+          totalWeight += weight;
+        }
+      }
+      if (members.length < 2) {
+        continue;
+      }
+      final cluster = _Cluster(
+        members: members,
+        weights: clusterWeights,
+        totalWeight: totalWeight,
+      );
+      if (bestCluster == null || cluster.totalWeight > bestCluster.totalWeight) {
+        bestCluster = cluster;
+      }
+    }
+    if (bestCluster == null) {
+      return null;
+    }
+    final normalizedWeights = _normalizeWeights(bestCluster.weights);
+    return _Cluster(
+      members: bestCluster.members,
+      weights: normalizedWeights,
+      totalWeight: bestCluster.totalWeight,
+    );
+  }
+
+  Map<String, double> _normalizeWeights(Map<String, double> weights) {
+    final total = weights.values.fold<double>(0, (sum, value) => sum + value);
+    if (total == 0) {
+      return weights;
+    }
+    return {
+      for (final entry in weights.entries) entry.key: (entry.value / total).clamp(0.0, 1.0),
+    };
+  }
+}
+
+class _Cluster {
+  const _Cluster({
+    required this.members,
+    required this.weights,
+    required this.totalWeight,
+  });
+
+  final List<BpmReading> members;
+  final Map<String, double> weights;
+  final double totalWeight;
 }
