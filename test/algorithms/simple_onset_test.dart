@@ -13,7 +13,7 @@ void main() {
     final samples = SignalFactory.beatSignal(
       bpm: targetBpm,
       sampleRate: sampleRate,
-      duration: const Duration(seconds: 6),
+      duration: const Duration(seconds: 5),
     );
 
     final frames = SignalFactory.framesFromSamples(
@@ -25,7 +25,7 @@ void main() {
       sampleRate: sampleRate,
       minBpm: 60,
       maxBpm: 180,
-      windowDuration: Duration(seconds: 6),
+      windowDuration: Duration(seconds: 5),
     );
 
     const pipeline = PreprocessingPipeline();
@@ -37,9 +37,11 @@ void main() {
     final algorithm = SimpleOnsetAlgorithm();
     final reading = await algorithm.analyze(signal: signal);
 
-    print('SimpleOnset result: ${reading?.bpm} BPM (target: $targetBpm)');
-    print('  Confidence: ${reading?.confidence}');
-    print('  Metadata: ${reading?.metadata}');
+    printOnFailure(
+      'SimpleOnset result: ${reading?.bpm} BPM (target: $targetBpm)\n'
+      '  Confidence: ${reading?.confidence}\n'
+      '  Metadata: ${reading?.metadata}',
+    );
 
     expect(reading, isNotNull);
     expect((reading!.bpm - targetBpm).abs(), lessThan(5.0));

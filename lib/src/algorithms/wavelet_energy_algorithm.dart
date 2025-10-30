@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
@@ -218,28 +219,30 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final resolvedBpm = 60 * signal.context.sampleRate / finalLagSamples;
-    if (resolvedBpm < signal.context.minBpm || resolvedBpm > signal.context.maxBpm) {
-      if (!usedAggregate &&
-          aggregateLag != null &&
-          aggregateScore != null &&
-          aggregatedNormalized != null) {
-        finalEnvelope = aggregatedNormalized;
-        finalLagSamples = aggregateLag;
-        usedAggregate = true;
-      } else if (resolvedBpm < signal.context.minBpm || resolvedBpm > signal.context.maxBpm) {
-        return null;
-      }
+    final adjustment = AlgorithmUtils.coerceToRange(
+      resolvedBpm,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
+    if (adjustment == null) {
+      return null;
     }
 
-    final confidence = SignalUtils.autocorrelation(
-      finalEnvelope,
-      finalLagSamples,
-    ).clamp(0.0, 1.0);
+    final harmonicPenalty = adjustment.clamped
+        ? 0.6
+        : (1.0 - (adjustment.multiplier - 1.0).abs() * 0.15).clamp(0.6, 1.0);
+
+    final confidence = (SignalUtils.autocorrelation(
+          finalEnvelope,
+          finalLagSamples,
+        ) *
+        harmonicPenalty)
+        .clamp(0.0, 1.0);
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: 60 * signal.context.sampleRate / finalLagSamples,
+      bpm: adjustment.bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
       metadata: {
@@ -250,6 +253,8 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         'fallbackUsed': fallbackUsed,
         if (aggregateLag != null) 'aggregateLag': aggregateLag,
         if (aggregateScore != null) 'aggregateScore': aggregateScore,
+        'rangeMultiplier': adjustment.multiplier,
+        'rangeClamped': adjustment.clamped,
         if (diagnostics.isNotEmpty) 'candidates': diagnostics,
       },
     );

@@ -60,7 +60,7 @@ class BpmApp extends StatelessWidget {
       context: const DetectionContext(
         sampleRate: 44100,
         minBpm: 50,
-        maxBpm: 200,
+        maxBpm: 250,
         windowDuration: Duration(seconds: 6),
       ),
     );

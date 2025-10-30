@@ -47,11 +47,13 @@ void main() {
     final ratio400 = signal.rawSamples.length / signal.samples400Hz.length;
     expect(ratio400, closeTo(sampleRate / 400, 5.0));
 
-    print('Preprocessing completed:');
-    print('  Raw samples: ${signal.rawSamples.length}');
-    print('  Onset envelope: ${signal.onsetEnvelope.length}');
-    print('  8kHz samples: ${signal.samples8kHz.length}');
-    print('  400Hz samples: ${signal.samples400Hz.length}');
-    print('  Noise floor: ${signal.noiseFloor}');
+    printOnFailure(
+      'Preprocessing completed:\n'
+      '  Raw samples: ${signal.rawSamples.length}\n'
+      '  Onset envelope: ${signal.onsetEnvelope.length}\n'
+      '  8kHz samples: ${signal.samples8kHz.length}\n'
+      '  400Hz samples: ${signal.samples400Hz.length}\n'
+      '  Noise floor: ${signal.noiseFloor}',
+    );
   });
 }

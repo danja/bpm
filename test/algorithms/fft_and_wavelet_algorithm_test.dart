@@ -12,7 +12,7 @@ void main() {
     sampleRate: sampleRate,
     minBpm: 60,
     maxBpm: 180,
-    windowDuration: Duration(seconds: 12),
+    windowDuration: Duration(seconds: 6),
   );
 
   PreprocessedSignal preprocessSignal(List<double> samples) {
@@ -32,7 +32,7 @@ void main() {
     final samples = SignalFactory.beatSignal(
       bpm: targetBpm,
       sampleRate: sampleRate,
-      duration: const Duration(seconds: 12),
+      duration: const Duration(seconds: 5),
     );
 
     final preprocessed = preprocessSignal(samples);
@@ -52,7 +52,7 @@ void main() {
     final samples = SignalFactory.beatSignal(
       bpm: targetBpm,
       sampleRate: sampleRate,
-      duration: const Duration(seconds: 14),
+      duration: const Duration(seconds: 5),
       noiseAmplitude: 0.1,
     );
 

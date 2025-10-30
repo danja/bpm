@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:math' as math;
 
+import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/core/consensus_interface.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
@@ -20,6 +21,9 @@ class RobustConsensusEngine implements ConsensusInterface {
     this.clusterTolerance = 3.0, // BPM tolerance for clustering
     this.minClusterSize = 2, // Minimum algorithms to form valid cluster
     this.smoothingFactor = 0.25,
+    this.consensusHistoryLimit = 20,
+    this.minBpm = 50,
+    this.maxBpm = 250,
   });
 
   final int historySize;
@@ -28,6 +32,9 @@ class RobustConsensusEngine implements ConsensusInterface {
   final double clusterTolerance;
   final int minClusterSize;
   final double smoothingFactor;
+  final int consensusHistoryLimit;
+  final double minBpm;
+  final double maxBpm;
 
   // Per-algorithm history: algorithmId -> queue of BPM values
   final _algorithmHistories = <String, Queue<double>>{};
@@ -38,15 +45,21 @@ class RobustConsensusEngine implements ConsensusInterface {
   // Count of stable readings
   int _stableCount = 0;
 
+  // History of consensus outputs for stability scoring
+  final _consensusHistory = Queue<double>();
+
   @override
   ConsensusResult? combine(List<BpmReading> readings) {
     if (readings.isEmpty) {
       return _fallback();
     }
 
+    // Step 0: Normalize octave errors against consensus
+    final normalized = _normalizeOctaveErrors(readings);
+
     // Step 1: Update per-algorithm histories and filter outliers
     final cleanedReadings = <BpmReading>[];
-    for (final reading in readings) {
+    for (final reading in normalized) {
       final cleaned = _updateAndFilterAlgorithm(reading);
       if (cleaned != null) {
         cleanedReadings.add(cleaned);
@@ -75,6 +88,7 @@ class RobustConsensusEngine implements ConsensusInterface {
 
     // Step 6: Update state
     _currentConsensus = smoothed;
+    _updateConsensusHistory(smoothed);
 
     // Check stability
     if (_currentConsensus != null &&
@@ -85,7 +99,12 @@ class RobustConsensusEngine implements ConsensusInterface {
     }
 
     // Step 7: Calculate confidence
-    final confidence = _calculateConfidence(winningCluster, cleanedReadings.length);
+    final confidence = _calculateConfidence(
+      winningCluster: winningCluster,
+      totalReadings: cleanedReadings.length,
+      rawConsensus: rawConsensus,
+      smoothedConsensus: smoothed,
+    );
 
     // Step 8: Build weights map for debugging
     final weights = <String, double>{};
@@ -106,6 +125,54 @@ class RobustConsensusEngine implements ConsensusInterface {
     _algorithmHistories.clear();
     _currentConsensus = null;
     _stableCount = 0;
+    _consensusHistory.clear();
+  }
+
+  /// Normalize octave errors against evolving reference (current consensus or median).
+  List<BpmReading> _normalizeOctaveErrors(List<BpmReading> readings) {
+    if (readings.isEmpty) {
+      return readings;
+    }
+
+    var reference = _currentConsensus;
+    if (reference == null || reference <= 0) {
+      final bpms = readings.map((r) => r.bpm).toList();
+      reference = _calculateMedian(bpms);
+      if (reference <= 0) {
+        reference = (minBpm + maxBpm) / 2;
+      }
+    }
+
+    final normalized = <BpmReading>[];
+    for (final reading in readings) {
+      final adjustedBpm = AlgorithmUtils.normalizeToReference(
+        reading.bpm,
+        reference,
+        minBpm: minBpm,
+        maxBpm: maxBpm,
+      );
+
+      final metadata = Map<String, Object?>.from(reading.metadata);
+      final factor =
+          reading.bpm == 0 ? 1.0 : (adjustedBpm / reading.bpm).abs();
+      if ((factor - 1.0).abs() > 0.05) {
+        metadata['octaveNormalized'] = true;
+        metadata['octaveFactor'] = adjustedBpm / reading.bpm;
+      }
+
+      normalized.add(
+        BpmReading(
+          algorithmId: reading.algorithmId,
+          algorithmName: reading.algorithmName,
+          bpm: adjustedBpm,
+          confidence: reading.confidence,
+          timestamp: reading.timestamp,
+          metadata: metadata,
+        ),
+      );
+    }
+
+    return normalized;
   }
 
   /// Update algorithm history and filter outliers within that algorithm's stream
@@ -238,35 +305,47 @@ class RobustConsensusEngine implements ConsensusInterface {
     return _currentConsensus! + factor * (current - _currentConsensus!);
   }
 
-  double _calculateConfidence(_Cluster winningCluster, int totalReadings) {
-    // Base confidence from cluster size (majority strength)
-    final majorityRatio = winningCluster.members.length / totalReadings;
-    var confidence = majorityRatio;
+  void _updateConsensusHistory(double value) {
+    _consensusHistory.add(value);
+    while (_consensusHistory.length > consensusHistoryLimit) {
+      _consensusHistory.removeFirst();
+    }
+  }
 
-    // Boost for tight agreement within cluster
+  double _calculateConfidence({
+    required _Cluster winningCluster,
+    required int totalReadings,
+    required double rawConsensus,
+    required double smoothedConsensus,
+  }) {
+    if (totalReadings <= 0) {
+      return 0.0;
+    }
+
+    final majorityScore =
+        winningCluster.members.length / totalReadings.toDouble();
+
     final clusterBpms = winningCluster.members.map((r) => r.bpm).toList();
     final clusterMean = _calculateClusterMean(winningCluster);
-    final avgDeviation = clusterBpms
-        .map((bpm) => (bpm - clusterMean).abs())
-        .fold<double>(0.0, (sum, d) => sum + d) / clusterBpms.length;
+    final clusterVariance = clusterBpms
+        .map((bpm) => math.pow(bpm - clusterMean, 2).toDouble())
+        .fold<double>(0.0, (sum, value) => sum + value) /
+        math.max(1, clusterBpms.length - 1);
+    final clusterStd = math.sqrt(clusterVariance);
+    final clusterScore = (1.0 - (clusterStd / 4.0)).clamp(0.0, 1.0);
 
-    if (avgDeviation < 1.5) {
-      confidence *= 1.3; // Very tight agreement
-    } else if (avgDeviation < 3.0) {
-      confidence *= 1.1; // Good agreement
+    final stabilityScore = _consensusStabilityScore();
+    final drift = (rawConsensus - smoothedConsensus).abs();
+    final driftScore = (1.0 - drift / 6.0).clamp(0.0, 1.0);
+
+    var confidence = (majorityScore * 0.45) +
+        (clusterScore * 0.25) +
+        (stabilityScore * 0.20) +
+        (driftScore * 0.10);
+
+    if (_stableCount > 8) {
+      confidence = math.min(confidence + 0.05, 1.0);
     }
-
-    // Boost for stability over time
-    if (_stableCount > 5) {
-      confidence *= 1.2;
-    }
-
-    // Consider individual algorithm confidences
-    final avgAlgorithmConfidence = winningCluster.members
-        .map((r) => r.confidence)
-        .fold<double>(0.0, (sum, c) => sum + c) / winningCluster.members.length;
-
-    confidence = (confidence + avgAlgorithmConfidence) / 2;
 
     return confidence.clamp(0.0, 1.0);
   }
@@ -276,11 +355,33 @@ class RobustConsensusEngine implements ConsensusInterface {
       return null;
     }
 
+    final stability = _consensusStabilityScore();
+    final fallbackConfidence = math.max(
+      0.15,
+      stability * 0.7,
+    );
+
     return ConsensusResult(
       bpm: _currentConsensus!,
-      confidence: math.max(0.2, 0.8 - _stableCount * 0.1), // Decay confidence without new readings
+      confidence: fallbackConfidence,
       weights: const {},
     );
+  }
+
+  double _consensusStabilityScore() {
+    if (_consensusHistory.length < 2) {
+      return 0.5;
+    }
+    final values = _consensusHistory.toList(growable: false);
+    final mean =
+        values.reduce((sum, value) => sum + value) / values.length.toDouble();
+    var variance = 0.0;
+    for (final value in values) {
+      variance += math.pow(value - mean, 2).toDouble();
+    }
+    variance /= values.length;
+    final stdDev = math.sqrt(variance);
+    return (1.0 - (stdDev / 6.0)).clamp(0.0, 1.0);
   }
 }
 

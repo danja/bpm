@@ -1,8 +1,10 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../algorithms/detection_context.dart';
 import '../models/bpm_models.dart';
 import 'filtering.dart';
+import 'mel_spectrogram.dart';
 import 'normalization.dart';
 import 'onset_detection.dart';
 import 'signal_utils.dart';
@@ -20,6 +22,8 @@ class PreprocessedSignal {
     required this.onsetEnvelope,
     required this.samples8kHz,
     required this.samples400Hz,
+    required this.melSpectrogram,
+    required this.melBandMeans,
     required this.originalSampleRate,
     required this.duration,
     required this.context,
@@ -43,6 +47,12 @@ class PreprocessedSignal {
 
   /// Downsampled to 400 Hz (for FFT tempo analysis)
   final Float32List samples400Hz;
+
+  /// Mel-spectrogram frames (mel bands × time)
+  final List<Float32List> melSpectrogram;
+
+  /// Mean mel-band energy profile (length == number of mel bands)
+  final Float32List melBandMeans;
 
   /// Original sample rate in Hz
   final int originalSampleRate;
@@ -127,6 +137,17 @@ class PreprocessingPipeline {
     final samples8kHz = _downsampleTo(filtered, sampleRate, targetRate: 8000);
     final samples400Hz = _downsampleTo(filtered, sampleRate, targetRate: 400);
 
+    // Step 6: Compute mel-spectrum (perceptual emphasis)
+    final melFeatures = computeMelSpectrogram(
+      filtered,
+      sampleRate: sampleRate,
+      fftSize: 1024,
+      hopSize: 512,
+      melBands: 40,
+      minFrequency: 20,
+      maxFrequency: math.min(5000, sampleRate / 2),
+    );
+
     return PreprocessedSignal(
       rawSamples: rawSamples,
       normalizedSamples: normalized,
@@ -134,6 +155,8 @@ class PreprocessingPipeline {
       onsetEnvelope: onset,
       samples8kHz: samples8kHz,
       samples400Hz: samples400Hz,
+      melSpectrogram: melFeatures.frames,
+      melBandMeans: melFeatures.meanBands,
       originalSampleRate: sampleRate,
       duration: duration,
       context: context,
@@ -170,6 +193,8 @@ class PreprocessingPipeline {
       onsetEnvelope: empty,
       samples8kHz: empty,
       samples400Hz: empty,
+      melSpectrogram: const [],
+      melBandMeans: Float32List(0),
       originalSampleRate: context.sampleRate,
       duration: Duration.zero,
       context: context,

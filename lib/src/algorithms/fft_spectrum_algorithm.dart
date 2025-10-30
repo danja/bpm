@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/dsp/fft_utils.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
@@ -109,13 +110,25 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     final averageMagnitude = totalMagnitude == 0
         ? 1
         : totalMagnitude / (maxIndex - minIndex + 1);
+    final adjustment = AlgorithmUtils.coerceToRange(
+      bestBpm,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
+    if (adjustment == null) {
+      return null;
+    }
+
+    final harmonicPenalty = adjustment.clamped
+        ? 0.6
+        : (1.0 - (adjustment.multiplier - 1.0).abs() * 0.2).clamp(0.6, 1.0);
     final confidence =
-        (bestMagnitude / averageMagnitude).clamp(0.0, 1.0);
+        ((bestMagnitude / averageMagnitude) * harmonicPenalty).clamp(0.0, 1.0);
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: bestBpm,
+      bpm: adjustment.bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
       metadata: {
@@ -123,6 +136,8 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         'sampleRate': effectiveSampleRate,
         'peakMagnitude': bestMagnitude,
         'avgMagnitude': averageMagnitude,
+        'rangeMultiplier': adjustment.multiplier,
+        'rangeClamped': adjustment.clamped,
       },
     );
   }

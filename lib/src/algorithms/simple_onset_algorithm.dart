@@ -1,6 +1,8 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
+import 'package:bpm/src/algorithms/algorithm_utils.dart';
+import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
@@ -50,30 +52,28 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final medianIntervalSec = _median(intervals);
-    if (medianIntervalSec == 0) {
+    final trimmedIntervals = _filterIntervals(intervals);
+    if (trimmedIntervals.isEmpty) {
       return null;
     }
 
-    var bpm = 60.0 / medianIntervalSec;
-
-    // Handle harmonic detection - if BPM is too high, try dividing by 2, 3, or 4
-    if (bpm > signal.context.maxBpm) {
-      for (var divisor in [2, 3, 4]) {
-        final adjusted = bpm / divisor;
-        if (adjusted >= signal.context.minBpm && adjusted <= signal.context.maxBpm) {
-          bpm = adjusted;
-          break;
-        }
-      }
-    }
-
-    if (bpm < signal.context.minBpm || bpm > signal.context.maxBpm) {
+    final intervalSeconds = _median(trimmedIntervals);
+    if (intervalSeconds <= 0) {
       return null;
     }
+
+    final adjustment = AlgorithmUtils.coerceToRange(
+      60.0 / intervalSeconds,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
+    if (adjustment == null) {
+      return null;
+    }
+    final bpm = adjustment.bpm;
 
     // Calculate variance of intervals (now in seconds)
-    final variance = _variance(intervals, medianIntervalSec);
+    final variance = _variance(trimmedIntervals, intervalSeconds);
     // Adjust confidence calculation for seconds (variance will be smaller)
     final confidence = (1 / (1 + variance / 0.5)).clamp(0.0, 1.0);
 
@@ -86,6 +86,9 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       metadata: {
         'intervalVariance': variance,
         'peakCount': peaks.length,
+        'effectiveInterval': intervalSeconds,
+        'rangeMultiplier': adjustment.multiplier,
+        'rangeClamped': adjustment.clamped,
       },
     );
   }
@@ -157,5 +160,31 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       smoothed[i] = sum / currentWindow;
     }
     return _normalize(smoothed);
+  }
+
+  List<double> _filterIntervals(List<double> intervals) {
+    if (intervals.length < 3) {
+      return intervals;
+    }
+    final median = _median(intervals);
+    final deviations =
+        intervals.map((value) => (value - median).abs()).toList();
+    final mad = _median(deviations);
+    if (mad == 0) {
+      final tolerance = median * 0.1;
+      final filtered = intervals
+          .where((value) => (value - median).abs() <= tolerance)
+          .toList();
+      return filtered.isEmpty ? intervals : filtered;
+    }
+    final threshold = mad * 3.5;
+    final filtered = <double>[];
+    for (var i = 0; i < intervals.length; i++) {
+      final deviation = deviations[i];
+      if (deviation <= threshold) {
+        filtered.add(intervals[i]);
+      }
+    }
+    return filtered.isEmpty ? intervals : filtered;
   }
 }
