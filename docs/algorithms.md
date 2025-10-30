@@ -11,17 +11,17 @@ This document summarizes the signal-processing approaches currently implemented 
 ## Energy Onset (Transient) Detection
 
 - **Implementation**: `lib/src/algorithms/simple_onset_algorithm.dart`
-- **Idea**: Converts time-domain samples into short-time energy envelopes, thresholds local peaks, and converts average inter-peak intervals to BPM.
+- **Idea**: Converts time-domain samples into short-time energy envelopes, thresholds local peaks, and converts inter-peak intervals into BPM estimates.
 - **Key Steps**:
   - Flatten all frames, compute frame energy (`samples²` summed over `frameMillis` windows).
   - Normalize the envelope, keep peaks above 0.6 relative amplitude.
-  - Average inter-peak spacing (ms) and map to `60000 / Δt`.
-  - Confidence is inversely proportional to inter-beat interval variance.
+  - **PLAN‑03 Week 1**: build duration-weighted histograms of inter-peak intervals (20 ms bins), down-weight faster harmonics, and normalize the winning bucket into the `[minBpm, maxBpm]` range.
+  - Confidence blends inter-beat variance with histogram agreement (bucket strength/supporter ratio).
 - **References**:
   - D. Ellis, *“Beat Tracking by Dynamic Programming,”* ISMIR 2007 — describes transient-based beat inference.
   - A. Brossier, *“Automatic Annotation of Musical Audio for Interactive Applications,”* PhD thesis, 2006 — foundation for energy-based onset detection.
 
-**Usage Notes**: Works best on percussive material with clear kick/snare accents. Adjust `frameMillis` for finer temporal precision (smaller windows) or better noise resistance (larger windows).
+**Usage Notes**: Works best on percussive material with clear kick/snare accents. Adjust `frameMillis` for finer temporal precision (smaller windows) or better noise resistance (larger windows). Provide realistic `DetectionContext` bounds—the histogram normalizes to the closest BPM inside that window.
 
 ## Autocorrelation (Time-Domain Periodicity)
 
@@ -37,6 +37,8 @@ This document summarizes the signal-processing approaches currently implemented 
   - F. Gouyon & S. Dixon, *“A Review of Automatic Rhythm Description Systems,”* Computer Music Journal 29(1), 2005.
 
 **Usage Notes**: Sensitive to strong harmonics; pre-normalization and tight lag bounds reduce octave errors. Consider downsampling long windows to shrink the search space if performance becomes a concern.
+
+> PLAN‑03 Week 1 follow-up will import the interval histogram weighting used by the onset detector so autocorrelation favours fundamental lags when multiple harmonics compete.
 
 ## FFT Magnitude Spectrum
 

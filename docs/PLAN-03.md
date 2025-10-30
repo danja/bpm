@@ -2,7 +2,7 @@
 
 **Document Owner**: DSP & Algorithms Engineer + QA Engineer
 **Created**: 2025-10-30
-**Status**: Draft
+**Status**: In Progress (Week 1 refinement underway)
 **Purpose**: Define the next major iteration focused on delivering reliable BPM accuracy across algorithms, consensus, and real-world fixtures.
 
 ---
@@ -29,6 +29,12 @@
 ## 3. Strategy Overview
 
 ### Phase A — Interval & Harmonic Refinement (Week 1)
+
+**Progress so far (2025-10-30)**
+
+- ✅ Added histogram-based fundamental selector for `SimpleOnsetAlgorithm` with duration-weighted bins and harmonic penalties.
+- ✅ Expanded per-reading metadata (bucket scores, multipliers, supporter counts) surfaced to consensus and integration tests.
+- ⏳ Remaining: apply histogram/harmonic filtering to Autocorrelation, integrate onset-weighted lag gating, and finalise adaptive threshold tuning.
 
 1. **Interval histogramming**
    - Build histograms over inter-onset intervals (quantized bins) to identify dominant periodicities.
@@ -118,4 +124,3 @@ Each milestone should conclude with a regression run on both synthetic and WAV f
 2. Create additional unit tests targeting histogram edge cases (e.g., alternating strong/weak beats).
 3. Draft WAV fixture list and secure licensing; script downloads into `assets/audio/fixtures`.
 4. Schedule check-in midway through Week 1 to review histogram outputs and adjust harmonic penalties based on early results.
-

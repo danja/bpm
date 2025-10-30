@@ -39,9 +39,9 @@ This project follows the layered structure defined in [`docs/PLAN-01.md`](PLAN-0
 
 ## Algorithms Layer
 
-Implemented detectors live under `lib/src/algorithms/` and share the `BpmDetectionAlgorithm` interface. Details + references in [`docs/algorithms.md`](algorithms.md).
+Implemented detectors live under `lib/src/algorithms/` and share the `BpmDetectionAlgorithm` interface. Details + references in [`docs/algorithms.md`](algorithms.md). Accuracy stabilization work is tracked in [`docs/PLAN-03.md`](PLAN-03.md).
 
-1. **Simple Onset** (`simple_onset_algorithm.dart`) — Short-time energy and peak spacing.
+1. **Simple Onset** (`simple_onset_algorithm.dart`) — Short-time energy and peak spacing. Week‑1 PLAN‑03 updates add duration-weighted interval histograms, harmonic penalties, and richer metadata for consensus.
 2. **Autocorrelation** (`autocorrelation_algorithm.dart`) — Time-domain periodicity scan.
 3. **FFT Spectrum** (`fft_spectrum_algorithm.dart`) — Frequency-domain peak picking.
 4. **Wavelet Energy** (`wavelet_energy_algorithm.dart`) — Multiresolution Haar bands with aggregation + fallback.
