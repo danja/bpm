@@ -24,7 +24,7 @@ class BpmCubit extends Cubit<BpmState> {
     }
 
     emit(
-      state.copyWith(
+      BpmState.initial().copyWith(
         status: DetectionStatus.listening,
         readings: const [],
         clearConsensus: true,
@@ -68,12 +68,7 @@ class BpmCubit extends Cubit<BpmState> {
     await _subscription?.cancel();
     _subscription = null;
     await _repository.stop();
-    emit(
-      state.copyWith(
-        status: DetectionStatus.idle,
-        message: null,
-      ),
-    );
+    emit(BpmState.initial());
   }
 
   @override
