@@ -66,74 +66,27 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final bucketSize = 0.5;
-    final bucketScores = <double, double>{};
-    final bucketCounts = <double, int>{};
-    final bucketSources = <double, Set<String>>{};
-    final harmonics = [1.0, 0.5, 2.0, 1.5, 2 / 3, 3.0, 4.0, 0.25];
-    final spread = representativeInterval * 0.35 + 1e-6;
-
-    for (final interval in trimmedIntervals) {
-      if (interval <= 0) continue;
-      final baseWeight =
-          1.0 / (1.0 + (interval - representativeInterval).abs() / spread);
-      if (baseWeight <= 0) continue;
-
-      final baseBpm = 60.0 / interval;
-      for (final factor in harmonics) {
-        final candidate = baseBpm * factor;
-        final adjusted = AlgorithmUtils.coerceToRange(
-          candidate,
-          minBpm: signal.context.minBpm,
-          maxBpm: signal.context.maxBpm,
-        );
-        if (adjusted == null) continue;
-
-        final harmonicPenalty =
-            (1.0 - (adjusted.multiplier - 1.0).abs() * 0.35).clamp(0.55, 1.0);
-        final score = baseWeight * harmonicPenalty;
-        if (score <= 0) continue;
-
-        final bucketKey =
-            (adjusted.bpm / bucketSize).round() * bucketSize;
-        bucketScores[bucketKey] =
-            (bucketScores[bucketKey] ?? 0) + score;
-        bucketCounts[bucketKey] = (bucketCounts[bucketKey] ?? 0) + 1;
-        bucketSources.putIfAbsent(bucketKey, () => <String>{}).add('interval');
-      }
-    }
-
-    if (bucketScores.isEmpty) {
+    final selection = _selectTempoCandidate(
+      intervals: trimmedIntervals,
+      context: signal.context,
+    );
+    if (selection == null || selection.normalizedInterval <= 0) {
       return null;
     }
 
-    final totalScore = bucketScores.values.fold<double>(0, (sum, value) => sum + value);
-
-    var bestBucket = bucketScores.entries.first.key;
-    var bestScore = double.negativeInfinity;
-    final targetBpm = 60.0 / representativeInterval;
-
-    bucketScores.forEach((bucket, score) {
-      final proximity = 1.0 / (1.0 + (bucket - targetBpm).abs() / targetBpm);
-      final weightedScore = score * (0.7 + 0.3 * proximity);
-      if (weightedScore > bestScore) {
-        bestScore = weightedScore;
-        bestBucket = bucket;
-      }
-    });
-
-    final bpm = bestBucket;
-    final effectiveInterval = 60.0 / bpm;
+    final bpm = 60.0 / selection.normalizedInterval;
+    final effectiveInterval = selection.normalizedInterval;
 
     // Calculate variance of intervals (now in seconds)
     final variance = _variance(trimmedIntervals, effectiveInterval);
     final baseConfidence = (1 / (1 + variance / 0.5)).clamp(0.0, 1.0);
-    final clusterStrength = (bestScore.clamp(0, double.infinity) / (totalScore + 1e-6))
-        .clamp(0.0, 1.0);
-    final membershipRatio =
-        (bucketCounts[bestBucket] ?? 1) / trimmedIntervals.length.toDouble();
-    final clusterConsistency = (0.6 * clusterStrength + 0.4 * membershipRatio)
-        .clamp(0.1, 1.0);
+    final clusterStrength =
+        (selection.score / (selection.totalScore + 1e-6)).clamp(0.0, 1.0);
+    final supporterRatio =
+        selection.supporters / trimmedIntervals.length.toDouble();
+    final clusterConsistency =
+        (0.7 * clusterStrength + 0.3 * supporterRatio.clamp(0.0, 1.0))
+            .clamp(0.1, 1.0);
 
     final confidence =
         (baseConfidence * clusterConsistency).clamp(0.0, 1.0);
@@ -142,15 +95,15 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       'intervalVariance': variance,
       'peakCount': peaks.length,
       'effectiveInterval': effectiveInterval,
-      'bucketSize': bucketSize,
-      'bucketScores': bucketScores,
-      'bucketCounts': bucketCounts,
+      'candidateScores': selection.scoreMap,
       'clusterConsistency': clusterConsistency,
       'clusterStrength': clusterStrength,
-      'membershipRatio': membershipRatio,
-      'baseBpm': 60.0 / representativeInterval,
-      'rawBucketBpm': bestBucket,
-      'sources': bucketSources[bestBucket]?.toList() ?? const <String>[],
+      'totalScore': selection.totalScore,
+      'baseBpm': 60.0 / selection.interval,
+      'supporterCount': selection.supporters,
+      'rangeMultiplier': selection.multiplier,
+      'rangeClamped': selection.multiplier.abs() > 1.05,
+      'sources': selection.sources,
     };
 
     return BpmReading(
@@ -295,64 +248,149 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     return _median(slice);
   }
 
-  List<TempoCandidate> _buildTempoCandidates({
-    required List<double> intervals,
-    required double representativeInterval,
-  }) {
-    final candidates = <TempoCandidate>[];
-    final spread = representativeInterval * 0.35 + 1e-6;
-
-    for (final interval in intervals) {
-      if (interval <= 0) continue;
-      final baseWeight =
-          1.0 / (1.0 + (interval - representativeInterval).abs() / spread);
-      if (baseWeight <= 0) continue;
-      final baseBpm = 60.0 / interval;
-      for (final entry in const [
-        (1.0, 1.0),
-        (0.5, 0.65),
-        (2.0, 0.6),
-        (1.5, 0.55),
-        (2 / 3, 0.55),
-        (3.0, 0.45),
-      ]) {
-        final factor = entry.$1;
-        final factorWeight = entry.$2;
-        candidates.add(
-          TempoCandidate(
-            bpm: baseBpm * factor,
-            weight: baseWeight * factorWeight,
-            source: 'interval',
-          ),
-        );
-      }
-    }
-
-    final repBpm = 60.0 / representativeInterval;
-    candidates.add(
-      TempoCandidate(
-        bpm: repBpm,
-        weight: 1.2,
-        source: 'representative',
-        allowHarmonics: false,
-      ),
-    );
-    candidates.add(
-      TempoCandidate(
-        bpm: repBpm * 0.5,
-        weight: 0.5,
-        source: 'rep_half',
-      ),
-    );
-    candidates.add(
-      TempoCandidate(
-        bpm: repBpm * 2.0,
-        weight: 0.5,
-        source: 'rep_double',
-      ),
-    );
-
-    return candidates;
+_TempoSelection? _selectTempoCandidate({
+  required List<double> intervals,
+  required DetectionContext context,
+}) {
+  const binSize = 0.02; // 20ms histogram bins
+  if (intervals.isEmpty) {
+    return null;
   }
 
+  final sorted = List<double>.from(intervals.where((value) => value > 0))
+    ..sort();
+  if (sorted.isEmpty) {
+    return null;
+  }
+
+  final startIndex = (sorted.length * 0.4).floor().clamp(0, sorted.length - 1);
+  final dominantIntervals = sorted.sublist(startIndex);
+
+  final buckets = <double, _HistogramBucket>{};
+
+  void accumulate(
+    double rawInterval,
+    double weight,
+    int supporters,
+    String source,
+  ) {
+    if (rawInterval <= 0 || weight <= 0) return;
+    final normalized = _normalizeInterval(rawInterval, context);
+    if (normalized <= 0) return;
+    final bin = (normalized / binSize).round() * binSize;
+    final bucket =
+        buckets.putIfAbsent(bin, () => _HistogramBucket(interval: bin));
+    bucket.add(weight: weight, supporters: supporters, source: source);
+  }
+
+  for (final interval in dominantIntervals) {
+    final baseWeight = interval * interval;
+    accumulate(interval, baseWeight, 1, 'interval');
+    accumulate(interval * 2, baseWeight * 0.25, 0, 'double_interval');
+    accumulate(interval * 3, baseWeight * 0.15, 0, 'triple_interval');
+    accumulate(interval / 2, baseWeight * 0.1, 0, 'half_interval');
+  }
+
+  if (buckets.isEmpty) {
+    return null;
+  }
+
+  final bucketList = buckets.values.toList()
+    ..sort((a, b) {
+      final scoreCompare = b.score.compareTo(a.score);
+      if (scoreCompare != 0) {
+        return scoreCompare;
+      }
+      return a.interval.compareTo(b.interval);
+    });
+
+  final primary = bucketList.first;
+  var selected = primary;
+
+  for (final bucket in bucketList) {
+    final bpm = 60.0 / bucket.interval;
+    final primaryBpm = 60.0 / primary.interval;
+    if (bpm <= primaryBpm / 1.6 &&
+        bucket.score >= primary.score * 0.6) {
+      selected = bucket;
+      break;
+    }
+  }
+
+  final normalizedInterval = _normalizeInterval(selected.interval, context);
+  if (normalizedInterval <= 0) {
+    return null;
+  }
+
+  final multiplier = normalizedInterval / selected.interval;
+  final scoreMap = <double, double>{
+    for (final bucket in bucketList) 60.0 / bucket.interval: bucket.score,
+  };
+  final totalScore =
+      bucketList.fold<double>(0, (sum, bucket) => sum + bucket.score);
+
+  return _TempoSelection(
+    interval: selected.interval,
+    normalizedInterval: normalizedInterval,
+    score: selected.score,
+    totalScore: totalScore,
+    supporters: selected.count,
+    scoreMap: scoreMap,
+    multiplier: multiplier,
+    sources: selected.sources.toList(),
+  );
+}
+
+  double _normalizeInterval(double interval, DetectionContext context) {
+    var value = interval;
+    var guard = 0;
+    while (value > 0 && 60.0 / value > context.maxBpm && guard < 6) {
+      value *= 2;
+      guard++;
+    }
+    while (value > 0 && 60.0 / value < context.minBpm && guard > -6) {
+      value /= 2;
+      guard--;
+    }
+    return value <= 0 ? 0 : value;
+  }
+}
+
+class _TempoSelection {
+  const _TempoSelection({
+    required this.interval,
+    required this.normalizedInterval,
+    required this.score,
+    required this.totalScore,
+    required this.supporters,
+    required this.scoreMap,
+    required this.multiplier,
+    required this.sources,
+  });
+
+  final double interval;
+  final double normalizedInterval;
+  final double score;
+  final double totalScore;
+  final int supporters;
+  final Map<double, double> scoreMap;
+  final double multiplier;
+  final List<String> sources;
+}
+
+class _HistogramBucket {
+  _HistogramBucket({required this.interval});
+
+  final double interval;
+  double weight = 0;
+  int count = 0;
+  final Set<String> sources = <String>{};
+
+  void add({required double weight, required int supporters, required String source}) {
+    this.weight += weight;
+    count += supporters;
+    sources.add(source);
+  }
+
+  double get score => weight * interval;
 }

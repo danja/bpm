@@ -371,7 +371,6 @@ class RobustConsensusEngine implements ConsensusInterface {
       consistencySum += weight * consistency.clamp(0.0, 1.0);
       final multiplier =
           (reading.metadata['rangeMultiplier'] as num?)?.toDouble() ?? 1.0;
-      final clamped = reading.metadata['rangeClamped'] == true;
       multiplierDeviationSum += weight * (multiplier - 1.0).abs();
     }
 

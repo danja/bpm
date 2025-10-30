@@ -39,7 +39,7 @@ void main() {
     );
   });
 
-  Future<void> _expectReading(
+  Future<void> expectMetronomeReading(
     Future<BpmReading?> readingFuture, {
     double tolerance = 2.0,
     double minConfidence = 0.2,
@@ -61,7 +61,7 @@ void main() {
 
   test('SimpleOnset matches metronome wav', () async {
     final algorithm = SimpleOnsetAlgorithm();
-    await _expectReading(
+    await expectMetronomeReading(
       algorithm.analyze(signal: signal),
       label: 'SimpleOnset',
       tolerance: 2.5,
@@ -70,7 +70,7 @@ void main() {
 
   test('Autocorrelation matches metronome wav', () async {
     final algorithm = AutocorrelationAlgorithm();
-    await _expectReading(
+    await expectMetronomeReading(
       algorithm.analyze(signal: signal),
       label: 'Autocorrelation',
       tolerance: 2.5,
@@ -80,7 +80,7 @@ void main() {
 
   test('FFT spectrum matches metronome wav', () async {
     final algorithm = FftSpectrumAlgorithm();
-    await _expectReading(
+    await expectMetronomeReading(
       algorithm.analyze(signal: signal),
       label: 'FFT spectrum',
       tolerance: 2.5,
@@ -90,7 +90,7 @@ void main() {
 
   test('Wavelet energy matches metronome wav', () async {
     final algorithm = WaveletEnergyAlgorithm(levels: 2);
-    await _expectReading(
+    await expectMetronomeReading(
       algorithm.analyze(signal: signal),
       label: 'Wavelet energy',
       tolerance: 3.0,
