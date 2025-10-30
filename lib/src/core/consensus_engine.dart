@@ -1,8 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:bpm/src/core/consensus_interface.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
-class ConsensusEngine {
+class ConsensusEngine implements ConsensusInterface {
   ConsensusEngine({
     this.minConfidence = 0.05,
     this.halfTempoTolerance = 0.03,
@@ -19,6 +20,7 @@ class ConsensusEngine {
 
   double? _previousBpm;
 
+  @override
   ConsensusResult? combine(List<BpmReading> readings) {
     if (readings.isEmpty) return _fallback();
 

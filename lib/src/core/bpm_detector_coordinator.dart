@@ -10,7 +10,7 @@ import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
-import 'package:bpm/src/core/consensus_engine.dart';
+import 'package:bpm/src/core/consensus_interface.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
@@ -28,7 +28,7 @@ class BpmDetectorCoordinator {
 
   final AudioStreamSource audioSource;
   final AlgorithmRegistry registry;
-  final ConsensusEngine consensusEngine;
+  final ConsensusInterface consensusEngine;
   final Duration bufferWindow;
   final Duration analysisInterval;
   final _logger = AppLogger();

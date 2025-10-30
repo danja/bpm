@@ -8,7 +8,7 @@ import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/audio/record_audio_stream_source.dart';
 import 'package:bpm/src/core/bpm_detector_coordinator.dart';
-import 'package:bpm/src/core/consensus_engine.dart';
+import 'package:bpm/src/core/enhanced_consensus_engine.dart';
 import 'package:bpm/src/repository/bpm_repository.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/ui/screens/home_screen.dart';
@@ -33,7 +33,7 @@ class BpmApp extends StatelessWidget {
       algorithms.add(AutocorrelationAlgorithm());
     }
     if (enableWavelet) {
-      algorithms.add(WaveletEnergyAlgorithm(levels: 3));
+      algorithms.add(WaveletEnergyAlgorithm(levels: 2)); // Optimized to 2 levels for speed
     }
 
     final registry = AlgorithmRegistry(algorithms);
@@ -42,7 +42,13 @@ class BpmApp extends StatelessWidget {
     final coordinator = BpmDetectorCoordinator(
       audioSource: audioSource,
       registry: registry,
-      consensusEngine: ConsensusEngine(),
+      consensusEngine: EnhancedConsensusEngine(
+        historySize: 15, // Track last 15 readings
+        outlierThresholdMAD: 2.5, // Reject outliers beyond 2.5 MAD units
+        convergenceThreshold: 2.0, // Consider stable when within 2 BPM
+        minSmoothingFactor: 0.15, // Heavy smoothing when stable
+        maxSmoothingFactor: 0.5, // Responsive when changing
+      ),
       bufferWindow:
           const Duration(seconds: 4), // Shorter window for faster updates
     );
