@@ -52,30 +52,106 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final trimmedIntervals = _filterIntervals(intervals);
+    final trimmedIntervals = _filterIntervals(
+      intervals,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
     if (trimmedIntervals.isEmpty) {
       return null;
     }
 
-    final intervalSeconds = _median(trimmedIntervals);
-    if (intervalSeconds <= 0) {
+    final representativeInterval = _representativeInterval(trimmedIntervals);
+    if (representativeInterval <= 0) {
       return null;
     }
 
-    final adjustment = AlgorithmUtils.coerceToRange(
-      60.0 / intervalSeconds,
-      minBpm: signal.context.minBpm,
-      maxBpm: signal.context.maxBpm,
-    );
-    if (adjustment == null) {
+    final bucketSize = 0.5;
+    final bucketScores = <double, double>{};
+    final bucketCounts = <double, int>{};
+    final bucketSources = <double, Set<String>>{};
+    final harmonics = [1.0, 0.5, 2.0, 1.5, 2 / 3, 3.0, 4.0, 0.25];
+    final spread = representativeInterval * 0.35 + 1e-6;
+
+    for (final interval in trimmedIntervals) {
+      if (interval <= 0) continue;
+      final baseWeight =
+          1.0 / (1.0 + (interval - representativeInterval).abs() / spread);
+      if (baseWeight <= 0) continue;
+
+      final baseBpm = 60.0 / interval;
+      for (final factor in harmonics) {
+        final candidate = baseBpm * factor;
+        final adjusted = AlgorithmUtils.coerceToRange(
+          candidate,
+          minBpm: signal.context.minBpm,
+          maxBpm: signal.context.maxBpm,
+        );
+        if (adjusted == null) continue;
+
+        final harmonicPenalty =
+            (1.0 - (adjusted.multiplier - 1.0).abs() * 0.35).clamp(0.55, 1.0);
+        final score = baseWeight * harmonicPenalty;
+        if (score <= 0) continue;
+
+        final bucketKey =
+            (adjusted.bpm / bucketSize).round() * bucketSize;
+        bucketScores[bucketKey] =
+            (bucketScores[bucketKey] ?? 0) + score;
+        bucketCounts[bucketKey] = (bucketCounts[bucketKey] ?? 0) + 1;
+        bucketSources.putIfAbsent(bucketKey, () => <String>{}).add('interval');
+      }
+    }
+
+    if (bucketScores.isEmpty) {
       return null;
     }
-    final bpm = adjustment.bpm;
+
+    final totalScore = bucketScores.values.fold<double>(0, (sum, value) => sum + value);
+
+    var bestBucket = bucketScores.entries.first.key;
+    var bestScore = double.negativeInfinity;
+    final targetBpm = 60.0 / representativeInterval;
+
+    bucketScores.forEach((bucket, score) {
+      final proximity = 1.0 / (1.0 + (bucket - targetBpm).abs() / targetBpm);
+      final weightedScore = score * (0.7 + 0.3 * proximity);
+      if (weightedScore > bestScore) {
+        bestScore = weightedScore;
+        bestBucket = bucket;
+      }
+    });
+
+    final bpm = bestBucket;
+    final effectiveInterval = 60.0 / bpm;
 
     // Calculate variance of intervals (now in seconds)
-    final variance = _variance(trimmedIntervals, intervalSeconds);
-    // Adjust confidence calculation for seconds (variance will be smaller)
-    final confidence = (1 / (1 + variance / 0.5)).clamp(0.0, 1.0);
+    final variance = _variance(trimmedIntervals, effectiveInterval);
+    final baseConfidence = (1 / (1 + variance / 0.5)).clamp(0.0, 1.0);
+    final clusterStrength = (bestScore.clamp(0, double.infinity) / (totalScore + 1e-6))
+        .clamp(0.0, 1.0);
+    final membershipRatio =
+        (bucketCounts[bestBucket] ?? 1) / trimmedIntervals.length.toDouble();
+    final clusterConsistency = (0.6 * clusterStrength + 0.4 * membershipRatio)
+        .clamp(0.1, 1.0);
+
+    final confidence =
+        (baseConfidence * clusterConsistency).clamp(0.0, 1.0);
+
+    final metadata = <String, Object?>{
+      'intervalVariance': variance,
+      'peakCount': peaks.length,
+      'effectiveInterval': effectiveInterval,
+      'bucketSize': bucketSize,
+      'bucketScores': bucketScores,
+      'bucketCounts': bucketCounts,
+      'clusterConsistency': clusterConsistency,
+      'clusterStrength': clusterStrength,
+      'membershipRatio': membershipRatio,
+      'baseBpm': 60.0 / representativeInterval,
+      'rawBucketBpm': bestBucket,
+      'sources': bucketSources[bestBucket]?.toList() ?? const <String>[],
+    };
 
     return BpmReading(
       algorithmId: id,
@@ -83,13 +159,7 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {
-        'intervalVariance': variance,
-        'peakCount': peaks.length,
-        'effectiveInterval': intervalSeconds,
-        'rangeMultiplier': adjustment.multiplier,
-        'rangeClamped': adjustment.clamped,
-      },
+      metadata: metadata,
     );
   }
 
@@ -162,29 +232,127 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     return _normalize(smoothed);
   }
 
-  List<double> _filterIntervals(List<double> intervals) {
-    if (intervals.length < 3) {
-      return intervals;
+  List<double> _filterIntervals(
+    List<double> intervals, {
+    required double minBpm,
+    required double maxBpm,
+  }) {
+    final minInterval = 60.0 / maxBpm;
+    final maxInterval = 60.0 / minBpm;
+
+    var filtered = intervals
+        .where((value) =>
+            value > 0 &&
+            value >= minInterval * 0.5 &&
+            value <= maxInterval * 1.5)
+        .toList();
+
+    if (filtered.length < 3) {
+      filtered = intervals.where((value) => value > 0).toList();
     }
-    final median = _median(intervals);
+
+    if (filtered.isEmpty) {
+      return const <double>[];
+    }
+
+    final median = _median(filtered);
     final deviations =
-        intervals.map((value) => (value - median).abs()).toList();
+        filtered.map((value) => (value - median).abs()).toList();
     final mad = _median(deviations);
     if (mad == 0) {
-      final tolerance = median * 0.1;
-      final filtered = intervals
+      final tolerance = median * 0.12;
+      final candidates = filtered
           .where((value) => (value - median).abs() <= tolerance)
           .toList();
-      return filtered.isEmpty ? intervals : filtered;
+      return candidates.isEmpty ? filtered : candidates;
     }
-    final threshold = mad * 3.5;
-    final filtered = <double>[];
-    for (var i = 0; i < intervals.length; i++) {
+
+    final threshold = mad * 3.0;
+    final candidates = <double>[];
+    for (var i = 0; i < filtered.length; i++) {
       final deviation = deviations[i];
       if (deviation <= threshold) {
-        filtered.add(intervals[i]);
+        candidates.add(filtered[i]);
       }
     }
-    return filtered.isEmpty ? intervals : filtered;
+
+    return candidates.isEmpty ? filtered : candidates;
   }
+
+  double _representativeInterval(List<double> intervals) {
+    if (intervals.isEmpty) {
+      return 0;
+    }
+    if (intervals.length == 1) {
+      return intervals.first;
+    }
+    final sorted = List<double>.from(intervals)..sort();
+    final startIndex =
+        (sorted.length * 0.35).floor().clamp(0, sorted.length - 1);
+    final endIndex =
+        (sorted.length * 0.9).ceil().clamp(startIndex + 1, sorted.length);
+    final slice = sorted.sublist(startIndex, endIndex);
+    return _median(slice);
+  }
+
+  List<TempoCandidate> _buildTempoCandidates({
+    required List<double> intervals,
+    required double representativeInterval,
+  }) {
+    final candidates = <TempoCandidate>[];
+    final spread = representativeInterval * 0.35 + 1e-6;
+
+    for (final interval in intervals) {
+      if (interval <= 0) continue;
+      final baseWeight =
+          1.0 / (1.0 + (interval - representativeInterval).abs() / spread);
+      if (baseWeight <= 0) continue;
+      final baseBpm = 60.0 / interval;
+      for (final entry in const [
+        (1.0, 1.0),
+        (0.5, 0.65),
+        (2.0, 0.6),
+        (1.5, 0.55),
+        (2 / 3, 0.55),
+        (3.0, 0.45),
+      ]) {
+        final factor = entry.$1;
+        final factorWeight = entry.$2;
+        candidates.add(
+          TempoCandidate(
+            bpm: baseBpm * factor,
+            weight: baseWeight * factorWeight,
+            source: 'interval',
+          ),
+        );
+      }
+    }
+
+    final repBpm = 60.0 / representativeInterval;
+    candidates.add(
+      TempoCandidate(
+        bpm: repBpm,
+        weight: 1.2,
+        source: 'representative',
+        allowHarmonics: false,
+      ),
+    );
+    candidates.add(
+      TempoCandidate(
+        bpm: repBpm * 0.5,
+        weight: 0.5,
+        source: 'rep_half',
+      ),
+    );
+    candidates.add(
+      TempoCandidate(
+        bpm: repBpm * 2.0,
+        weight: 0.5,
+        source: 'rep_double',
+      ),
+    );
+
+    return candidates;
+  }
+
 }

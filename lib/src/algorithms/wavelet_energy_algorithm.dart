@@ -219,18 +219,75 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final resolvedBpm = 60 * signal.context.sampleRate / finalLagSamples;
-    final adjustment = AlgorithmUtils.coerceToRange(
-      resolvedBpm,
+
+    final candidates = <TempoCandidate>[
+      TempoCandidate(bpm: resolvedBpm, weight: 1.0, source: 'resolved'),
+    ];
+    if (aggregateLag != null && aggregateLag > 0) {
+      final aggregateBpm =
+          60 * signal.context.sampleRate / aggregateLag;
+      candidates.add(
+        TempoCandidate(
+          bpm: aggregateBpm,
+          weight: 0.75,
+          source: 'aggregate',
+        ),
+      );
+    }
+    if (fallback != null) {
+      final fallbackBpm =
+          60 * signal.context.sampleRate / fallback.lagSamples;
+      candidates.add(
+        TempoCandidate(
+          bpm: fallbackBpm,
+          weight: 0.6,
+          source: 'fallback',
+        ),
+      );
+    }
+    if (diagnostics.isNotEmpty) {
+      for (final entry in diagnostics) {
+        final lagSamples = entry['lagSamples'] as int? ?? 0;
+        if (lagSamples <= 0) continue;
+        final score = (entry['weightedScore'] as num?)?.toDouble() ?? 0.0;
+        final diagBpm =
+            60 * signal.context.sampleRate / lagSamples;
+        candidates.add(
+          TempoCandidate(
+            bpm: diagBpm,
+            weight: score.clamp(0.1, 1.0),
+            source: 'diag_level_${entry['level']}',
+          ),
+        );
+      }
+    }
+
+    final refinement = AlgorithmUtils.refineFromCandidates(
+      candidates: candidates,
       minBpm: signal.context.minBpm,
       maxBpm: signal.context.maxBpm,
     );
-    if (adjustment == null) {
-      return null;
+
+    BpmRangeResult? fallbackAdjustment;
+    if (refinement == null) {
+      fallbackAdjustment = AlgorithmUtils.coerceToRange(
+        resolvedBpm,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+      if (fallbackAdjustment == null) {
+        return null;
+      }
     }
 
-    final harmonicPenalty = adjustment.clamped
-        ? 0.6
-        : (1.0 - (adjustment.multiplier - 1.0).abs() * 0.15).clamp(0.6, 1.0);
+    final bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
+
+    final harmonicPenalty = refinement != null
+        ? refinement.consistency
+        : (fallbackAdjustment!.clamped
+            ? 0.6
+            : (1.0 - (fallbackAdjustment.multiplier - 1.0).abs() * 0.15)
+                .clamp(0.6, 1.0));
 
     final confidence = (SignalUtils.autocorrelation(
           finalEnvelope,
@@ -238,25 +295,44 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         ) *
         harmonicPenalty)
         .clamp(0.0, 1.0);
+    final metadata = <String, Object?>{
+      'lagSamples': finalLagSamples,
+      'level': usedAggregate ? -1 : bestLevel,
+      'refined': refine != null && !usedAggregate,
+      'aggregationUsed': usedAggregate,
+      'fallbackUsed': fallbackUsed,
+      if (aggregateLag != null) 'aggregateLag': aggregateLag,
+      if (aggregateScore != null) 'aggregateScore': aggregateScore,
+      'rawResolvedBpm': resolvedBpm,
+      'clusterConsistency': harmonicPenalty,
+      if (diagnostics.isNotEmpty) 'candidates': diagnostics,
+    };
+
+    if (refinement != null) {
+      metadata.addAll(refinement.metadata);
+      metadata['rangeMultiplier'] = refinement.averageMultiplier;
+      metadata['rangeClamped'] = refinement.clampedCount > 0;
+    } else {
+      metadata['clusterWeight'] = 0.0;
+      metadata['clusterStd'] = 0.0;
+      metadata['clusterCount'] = candidates.length;
+      metadata['maxMultiplierDeviation'] =
+          (fallbackAdjustment!.multiplier - 1.0).abs();
+      metadata['clampedContributors'] = fallbackAdjustment.clamped ? 1 : 0;
+      metadata['sources'] = const <String>['fallback'];
+      metadata['rangeMultiplier'] = fallbackAdjustment.multiplier;
+      metadata['rangeClamped'] = fallbackAdjustment.clamped;
+    }
+
+    metadata['clusterConsistency'] ??= harmonicPenalty;
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: adjustment.bpm,
+      bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {
-        'lagSamples': finalLagSamples,
-        'level': usedAggregate ? -1 : bestLevel,
-        'refined': refine != null && !usedAggregate,
-        'aggregationUsed': usedAggregate,
-        'fallbackUsed': fallbackUsed,
-        if (aggregateLag != null) 'aggregateLag': aggregateLag,
-        if (aggregateScore != null) 'aggregateScore': aggregateScore,
-        'rangeMultiplier': adjustment.multiplier,
-        'rangeClamped': adjustment.clamped,
-        if (diagnostics.isNotEmpty) 'candidates': diagnostics,
-      },
+      metadata: metadata,
     );
   }
 

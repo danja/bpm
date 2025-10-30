@@ -96,34 +96,80 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final rawBpm = 60 * effectiveSampleRate / bestLag;
-    final adjustment = AlgorithmUtils.coerceToRange(
-      rawBpm,
+
+    final candidates = <TempoCandidate>[
+      TempoCandidate(bpm: rawBpm, weight: 1.0, source: 'primary'),
+      TempoCandidate(bpm: rawBpm / 2, weight: 0.55, source: 'half'),
+      TempoCandidate(bpm: rawBpm * 2, weight: 0.5, source: 'double'),
+      TempoCandidate(bpm: rawBpm * 1.5, weight: 0.35, source: 'three-halves'),
+      TempoCandidate(bpm: rawBpm * 0.75, weight: 0.35, source: 'three-quarter'),
+    ];
+
+    final refinement = AlgorithmUtils.refineFromCandidates(
+      candidates: candidates,
       minBpm: signal.context.minBpm,
       maxBpm: signal.context.maxBpm,
     );
-    if (adjustment == null) {
-      return null;
+
+    BpmRangeResult? fallbackAdjustment;
+    if (refinement == null) {
+      fallbackAdjustment = AlgorithmUtils.coerceToRange(
+        rawBpm,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+      if (fallbackAdjustment == null) {
+        return null;
+      }
     }
 
-    final confidence = (bestScore.clamp(0.0, 1.0) *
-            _harmonicPenalty(adjustment.multiplier, adjustment.clamped))
-        .clamp(0.0, 1.0);
+    final bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
+
+    final penalty = refinement != null
+        ? refinement.consistency
+        : _harmonicPenalty(
+            fallbackAdjustment!.multiplier,
+            fallbackAdjustment.clamped,
+          );
+
+    final confidence =
+        (bestScore.clamp(0.0, 1.0) * penalty).clamp(0.0, 1.0);
+
+    final metadata = <String, Object?>{
+      'lag': bestLag,
+      'evaluations': evaluations,
+      'coarseStride': coarseStride,
+      'sampleRate': effectiveSampleRate,
+      'analysisSeconds': samples.length / effectiveSampleRate,
+      'rawBpm': rawBpm,
+      'clusterConsistency': penalty,
+    };
+
+    if (refinement != null) {
+      metadata.addAll(refinement.metadata);
+      metadata['rangeMultiplier'] = refinement.averageMultiplier;
+      metadata['rangeClamped'] = refinement.clampedCount > 0;
+    } else {
+      metadata['clusterWeight'] = 0.0;
+      metadata['clusterStd'] = 0.0;
+      metadata['clusterCount'] = 1;
+      metadata['maxMultiplierDeviation'] =
+          (fallbackAdjustment!.multiplier - 1.0).abs();
+      metadata['clampedContributors'] = fallbackAdjustment.clamped ? 1 : 0;
+      metadata['sources'] = const <String>['fallback'];
+      metadata['rangeMultiplier'] = fallbackAdjustment.multiplier;
+      metadata['rangeClamped'] = fallbackAdjustment.clamped;
+    }
+
+    metadata['clusterConsistency'] ??= penalty;
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: adjustment.bpm,
+      bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {
-        'lag': bestLag,
-        'evaluations': evaluations,
-        'coarseStride': coarseStride,
-        'sampleRate': effectiveSampleRate,
-        'analysisSeconds': samples.length / effectiveSampleRate,
-        'rangeMultiplier': adjustment.multiplier,
-        'rangeClamped': adjustment.clamped,
-      },
+      metadata: metadata,
     );
   }
 

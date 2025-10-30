@@ -110,35 +110,104 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     final averageMagnitude = totalMagnitude == 0
         ? 1
         : totalMagnitude / (maxIndex - minIndex + 1);
-    final adjustment = AlgorithmUtils.coerceToRange(
-      bestBpm,
+
+    final neighbors = <TempoCandidate>[
+      TempoCandidate(bpm: bestBpm, weight: 1.0, source: 'peak'),
+      TempoCandidate(bpm: bestBpm / 2, weight: 0.55, source: 'half'),
+      TempoCandidate(bpm: bestBpm * 2, weight: 0.5, source: 'double'),
+      TempoCandidate(bpm: bestBpm * 1.5, weight: 0.35, source: 'three-halves'),
+      TempoCandidate(bpm: bestBpm * 2 / 3, weight: 0.35, source: 'two-thirds'),
+    ];
+
+    // Add nearby spectral bins as candidates for clustering.
+    for (var offset = 1; offset <= 2; offset++) {
+      final index = _bestMagnitudeIndex(
+        spectrum.magnitudes,
+        minIndex,
+        maxIndex,
+        bestBpm,
+        freqResolution,
+        offset,
+      );
+      if (index != null) {
+        final freqHz = index * freqResolution;
+        final bpmCandidate = freqHz * 60;
+        final magnitude = spectrum.magnitudes[index];
+        final weight = (magnitude / (bestMagnitude + 1e-6)).clamp(0.2, 1.0);
+        neighbors.add(
+          TempoCandidate(
+            bpm: bpmCandidate,
+            weight: weight,
+            source: 'neighbor_$offset',
+          ),
+        );
+      }
+    }
+
+    final refinement = AlgorithmUtils.refineFromCandidates(
+      candidates: neighbors,
       minBpm: signal.context.minBpm,
       maxBpm: signal.context.maxBpm,
     );
-    if (adjustment == null) {
-      return null;
+
+    BpmRangeResult? fallbackAdjustment;
+    if (refinement == null) {
+      fallbackAdjustment = AlgorithmUtils.coerceToRange(
+        bestBpm,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+      if (fallbackAdjustment == null) {
+        return null;
+      }
     }
 
-    final harmonicPenalty = adjustment.clamped
-        ? 0.6
-        : (1.0 - (adjustment.multiplier - 1.0).abs() * 0.2).clamp(0.6, 1.0);
+    final bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
+
+    final penalty = refinement != null
+        ? refinement.consistency
+        : (fallbackAdjustment!.clamped
+            ? 0.6
+            : (1.0 - (fallbackAdjustment.multiplier - 1.0).abs() * 0.2)
+                .clamp(0.6, 1.0));
+
     final confidence =
-        ((bestMagnitude / averageMagnitude) * harmonicPenalty).clamp(0.0, 1.0);
+        ((bestMagnitude / averageMagnitude) * penalty).clamp(0.0, 1.0);
+
+    final metadata = <String, Object?>{
+      'fftSize': fftSize,
+      'sampleRate': effectiveSampleRate,
+      'peakMagnitude': bestMagnitude,
+      'avgMagnitude': averageMagnitude,
+      'rawBestBpm': bestBpm,
+      'clusterConsistency': penalty,
+    };
+
+    if (refinement != null) {
+      metadata.addAll(refinement.metadata);
+      metadata['rangeMultiplier'] = refinement.averageMultiplier;
+      metadata['rangeClamped'] = refinement.clampedCount > 0;
+    } else {
+      metadata['clusterWeight'] = 0.0;
+      metadata['clusterStd'] = 0.0;
+      metadata['clusterCount'] = neighbors.length;
+      metadata['maxMultiplierDeviation'] =
+          (fallbackAdjustment!.multiplier - 1.0).abs();
+      metadata['clampedContributors'] = fallbackAdjustment.clamped ? 1 : 0;
+      metadata['sources'] = const <String>['fallback'];
+      metadata['rangeMultiplier'] = fallbackAdjustment.multiplier;
+      metadata['rangeClamped'] = fallbackAdjustment.clamped;
+    }
+
+    metadata['clusterConsistency'] ??= penalty;
 
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: adjustment.bpm,
+      bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {
-        'fftSize': fftSize,
-        'sampleRate': effectiveSampleRate,
-        'peakMagnitude': bestMagnitude,
-        'avgMagnitude': averageMagnitude,
-        'rangeMultiplier': adjustment.multiplier,
-        'rangeClamped': adjustment.clamped,
-      },
+      metadata: metadata,
     );
   }
 }
@@ -147,6 +216,27 @@ int _boundedPowerOfTwo(int sampleCount, int minSize) {
   final desired = max(minSize, sampleCount);
   final nextPower = SignalUtils.nextPowerOfTwo(desired);
   return min(8192, nextPower);
+}
+
+int? _bestMagnitudeIndex(
+  List<double> magnitudes,
+  int minIndex,
+  int maxIndex,
+  double bestBpm,
+  double freqResolution,
+  int offset,
+) {
+  final targetFreq = bestBpm / 60;
+  final targetIndex = (targetFreq / freqResolution).round();
+  final index = targetIndex + offset;
+  if (index >= minIndex && index <= maxIndex) {
+    return index;
+  }
+  final fallback = targetIndex - offset;
+  if (fallback >= minIndex && fallback <= maxIndex) {
+    return fallback;
+  }
+  return null;
 }
 
 List<double> _energyEnvelope(List<double> samples) {

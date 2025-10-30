@@ -79,6 +79,10 @@ class RobustConsensusEngine implements ConsensusInterface {
 
     // Step 3: Select winning cluster (majority vote)
     final winningCluster = _selectWinningCluster(clusters);
+    final totalWeightAll = cleanedReadings.fold<double>(
+      0,
+      (sum, reading) => sum + _readingWeight(reading),
+    );
 
     // Step 4: Calculate consensus from winning cluster
     final rawConsensus = _calculateClusterMean(winningCluster);
@@ -102,14 +106,22 @@ class RobustConsensusEngine implements ConsensusInterface {
     final confidence = _calculateConfidence(
       winningCluster: winningCluster,
       totalReadings: cleanedReadings.length,
+      totalReadingsWeight: totalWeightAll,
       rawConsensus: rawConsensus,
       smoothedConsensus: smoothed,
     );
 
     // Step 8: Build weights map for debugging
     final weights = <String, double>{};
+    final clusterWeight = winningCluster.members.fold<double>(
+      0,
+      (sum, reading) => sum + _readingWeight(reading),
+    );
     for (final reading in winningCluster.members) {
-      weights[reading.algorithmId] = 1.0 / winningCluster.members.length;
+      final weight = _readingWeight(reading);
+      weights[reading.algorithmId] = clusterWeight == 0
+          ? 1.0 / winningCluster.members.length
+          : (weight / clusterWeight);
     }
 
     return ConsensusResult(
@@ -245,18 +257,23 @@ class RobustConsensusEngine implements ConsensusInterface {
 
   /// Select the winning cluster using majority vote
   _Cluster _selectWinningCluster(List<_Cluster> clusters) {
-    // Sort by cluster size (number of algorithms agreeing)
-    clusters.sort((a, b) => b.members.length.compareTo(a.members.length));
+    clusters.sort((a, b) {
+      final weightDiff = _clusterWeight(b).compareTo(_clusterWeight(a));
+      if (weightDiff != 0) {
+        return weightDiff;
+      }
+      return b.members.length.compareTo(a.members.length);
+    });
 
     var bestCluster = clusters.first;
 
-    // If tied, prefer cluster closer to current consensus
     if (_currentConsensus != null && clusters.length > 1) {
-      final topSize = clusters.first.members.length;
-      final tiedClusters = clusters.where((c) => c.members.length == topSize).toList();
+      final topWeight = _clusterWeight(clusters.first);
+      final tiedClusters = clusters
+          .where((cluster) => (_clusterWeight(cluster) - topWeight).abs() < 1e-6)
+          .toList();
 
       if (tiedClusters.length > 1) {
-        // Find cluster closest to current consensus
         var minDist = double.infinity;
         for (final cluster in tiedClusters) {
           final mean = _calculateClusterMean(cluster);
@@ -275,8 +292,20 @@ class RobustConsensusEngine implements ConsensusInterface {
   double _calculateClusterMean(_Cluster cluster) {
     if (cluster.members.isEmpty) return 0.0;
 
-    final sum = cluster.members.fold<double>(0.0, (sum, r) => sum + r.bpm);
-    return sum / cluster.members.length;
+    double weightedSum = 0;
+    double totalWeight = 0;
+    for (final reading in cluster.members) {
+      final weight = _readingWeight(reading);
+      weightedSum += reading.bpm * weight;
+      totalWeight += weight;
+    }
+
+    if (totalWeight <= 0) {
+      final sum = cluster.members.fold<double>(0.0, (sum, r) => sum + r.bpm);
+      return sum / cluster.members.length;
+    }
+
+    return weightedSum / totalWeight;
   }
 
   double _calculateMedian(List<double> values) {
@@ -315,6 +344,7 @@ class RobustConsensusEngine implements ConsensusInterface {
   double _calculateConfidence({
     required _Cluster winningCluster,
     required int totalReadings,
+    required double totalReadingsWeight,
     required double rawConsensus,
     required double smoothedConsensus,
   }) {
@@ -322,26 +352,50 @@ class RobustConsensusEngine implements ConsensusInterface {
       return 0.0;
     }
 
-    final majorityScore =
-        winningCluster.members.length / totalReadings.toDouble();
+    final clusterWeight = _clusterWeight(winningCluster);
+    final majorityScore = totalReadingsWeight <= 0
+        ? winningCluster.members.length / totalReadings.toDouble()
+        : (clusterWeight / totalReadingsWeight).clamp(0.0, 1.0);
 
-    final clusterBpms = winningCluster.members.map((r) => r.bpm).toList();
     final clusterMean = _calculateClusterMean(winningCluster);
-    final clusterVariance = clusterBpms
-        .map((bpm) => math.pow(bpm - clusterMean, 2).toDouble())
-        .fold<double>(0.0, (sum, value) => sum + value) /
-        math.max(1, clusterBpms.length - 1);
-    final clusterStd = math.sqrt(clusterVariance);
-    final clusterScore = (1.0 - (clusterStd / 4.0)).clamp(0.0, 1.0);
+    double variance = 0;
+    double weightSum = 0;
+    double consistencySum = 0;
+    double multiplierDeviationSum = 0;
+    for (final reading in winningCluster.members) {
+      final weight = _readingWeight(reading);
+      variance += weight * math.pow(reading.bpm - clusterMean, 2);
+      weightSum += weight;
+      final consistency =
+          (reading.metadata['clusterConsistency'] as num?)?.toDouble() ?? 1.0;
+      consistencySum += weight * consistency.clamp(0.0, 1.0);
+      final multiplier =
+          (reading.metadata['rangeMultiplier'] as num?)?.toDouble() ?? 1.0;
+      final clamped = reading.metadata['rangeClamped'] == true;
+      multiplierDeviationSum += weight * (multiplier - 1.0).abs();
+    }
+
+    final clusterStd = weightSum <= 0 ? 0 : math.sqrt(variance / weightSum);
+    final clusterStdScore = (1.0 / (1.0 + clusterStd / 3.0)).clamp(0.0, 1.0);
+    final avgConsistency = weightSum <= 0
+        ? 1.0
+        : (consistencySum / weightSum).clamp(0.0, 1.0);
+    final avgMultiplierDeviation = weightSum <= 0
+        ? 0.0
+        : (multiplierDeviationSum / weightSum).clamp(0.0, 2.0);
+    final harmonicScore =
+        (1.0 - math.min(0.4, avgMultiplierDeviation * 0.6)).clamp(0.4, 1.0);
 
     final stabilityScore = _consensusStabilityScore();
     final drift = (rawConsensus - smoothedConsensus).abs();
     final driftScore = (1.0 - drift / 6.0).clamp(0.0, 1.0);
 
-    var confidence = (majorityScore * 0.45) +
-        (clusterScore * 0.25) +
-        (stabilityScore * 0.20) +
-        (driftScore * 0.10);
+    var confidence = (majorityScore * 0.35) +
+        (clusterStdScore * 0.2) +
+        (avgConsistency * 0.15) +
+        (harmonicScore * 0.1) +
+        (stabilityScore * 0.1) +
+        (driftScore * 0.1);
 
     if (_stableCount > 8) {
       confidence = math.min(confidence + 0.05, 1.0);
@@ -366,6 +420,38 @@ class RobustConsensusEngine implements ConsensusInterface {
       confidence: fallbackConfidence,
       weights: const {},
     );
+  }
+
+  double _clusterWeight(_Cluster cluster) {
+    return cluster.members.fold<double>(
+      0,
+      (sum, reading) => sum + _readingWeight(reading),
+    );
+  }
+
+  double _readingWeight(BpmReading reading) {
+    final base = reading.confidence.clamp(0.0, 1.0);
+    final consistency =
+        (reading.metadata['clusterConsistency'] as num?)?.toDouble() ?? 1.0;
+    final multiplier =
+        (reading.metadata['rangeMultiplier'] as num?)?.toDouble() ?? 1.0;
+    final clamped = reading.metadata['rangeClamped'] == true;
+    final multiplierWeight = _multiplierWeight(multiplier, clamped);
+    final octavePenalty = reading.metadata['octaveNormalized'] == true ? 0.85 : 1.0;
+    final weight = base * (0.6 + 0.4 * consistency.clamp(0.0, 1.0)) * multiplierWeight * octavePenalty;
+    if (weight.isNaN || weight.isInfinite) {
+      return 0.1;
+    }
+    return weight.clamp(0.05, 1.0);
+  }
+
+  double _multiplierWeight(double multiplier, bool clamped) {
+    var penalty = 1.0 - (multiplier - 1.0).abs() * 0.35;
+    penalty = penalty.clamp(0.4, 1.0);
+    if (clamped) {
+      penalty *= 0.75;
+    }
+    return penalty.clamp(0.3, 1.0);
   }
 
   double _consensusStabilityScore() {
