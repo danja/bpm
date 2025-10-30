@@ -11,6 +11,7 @@ import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
 import 'package:bpm/src/audio/audio_stream_source.dart';
 import 'package:bpm/src/core/consensus_engine.dart';
+import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/utils/app_logger.dart';
@@ -505,6 +506,20 @@ Future<List<BpmReading>> _runAlgorithmsInIsolate(
     return results; // No audio data
   }
 
+  // PHASE 1: Run preprocessing pipeline ONCE for all algorithms
+  PreprocessedSignal signal;
+  try {
+    const pipeline = PreprocessingPipeline();
+    signal = pipeline.process(
+      window: params.frames,
+      context: params.context,
+    );
+  } catch (e) {
+    // Preprocessing failed, return empty results
+    return results;
+  }
+
+  // PHASE 2: Run each algorithm on the preprocessed signal
   for (final algorithmId in params.algorithmIds) {
     try {
       BpmDetectionAlgorithm? algorithm;
@@ -528,8 +543,7 @@ Future<List<BpmReading>> _runAlgorithmsInIsolate(
       }
 
       final reading = await algorithm.analyze(
-        window: params.frames,
-        context: params.context,
+        signal: signal,
       );
 
       if (reading != null) {

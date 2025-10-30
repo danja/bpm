@@ -1,14 +1,15 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
-import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
 /// Energy-based transient detection translated into BPM.
+///
+/// Now uses pre-computed onset envelope from preprocessing pipeline,
+/// eliminating redundant energy calculations and improving performance.
 class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
-  SimpleOnsetAlgorithm({this.frameMillis = 30}); // Smaller frames for better transient detection
-
-  final int frameMillis;
+  SimpleOnsetAlgorithm();
 
   @override
   String get id => 'simple_onset';
@@ -21,66 +22,60 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
 
   @override
   Future<BpmReading?> analyze({
-    required List<AudioFrame> window,
-    required DetectionContext context,
+    required PreprocessedSignal signal,
   }) async {
-    if (window.isEmpty) {
-      return null;
-    }
-
-    final flattened = window.expand((frame) => frame.samples).toList();
-    if (flattened.isEmpty) {
-      return null;
-    }
-
-    final preprocessed = _preprocessSamples(flattened);
-
-    final frameSize =
-        max(1, (context.sampleRate * (frameMillis / 1000)).round());
-    final envelope = _shortTimeEnergy(preprocessed, frameSize);
+    // Use pre-computed onset envelope from preprocessing
+    final envelope = signal.onsetEnvelope;
     if (envelope.length < 4) {
       return null;
     }
 
+    // Smooth the envelope
     final smoothed = _smooth(envelope, max(3, envelope.length ~/ 60));
 
+    // Detect peaks in the smoothed envelope
     final peaks = _detectPeaks(smoothed);
     if (peaks.length < 2) {
       return null;
     }
 
+    // Calculate inter-peak intervals in seconds
+    // Onset envelope is computed with ~10ms hop, so timeScale is 0.01 seconds per sample
+    final timeScale = signal.onsetTimeScale;
     final intervals = <double>[];
     for (var i = 1; i < peaks.length; i++) {
-      intervals.add((peaks[i] - peaks[i - 1]) * frameMillis.toDouble());
+      intervals.add((peaks[i] - peaks[i - 1]) * timeScale);
     }
     if (intervals.isEmpty) {
       return null;
     }
 
-    final medianIntervalMs = _median(intervals);
-    if (medianIntervalMs == 0) {
+    final medianIntervalSec = _median(intervals);
+    if (medianIntervalSec == 0) {
       return null;
     }
 
-    var bpm = 60000 / medianIntervalMs;
+    var bpm = 60.0 / medianIntervalSec;
 
     // Handle harmonic detection - if BPM is too high, try dividing by 2, 3, or 4
-    if (bpm > context.maxBpm) {
+    if (bpm > signal.context.maxBpm) {
       for (var divisor in [2, 3, 4]) {
         final adjusted = bpm / divisor;
-        if (adjusted >= context.minBpm && adjusted <= context.maxBpm) {
+        if (adjusted >= signal.context.minBpm && adjusted <= signal.context.maxBpm) {
           bpm = adjusted;
           break;
         }
       }
     }
 
-    if (bpm < context.minBpm || bpm > context.maxBpm) {
+    if (bpm < signal.context.minBpm || bpm > signal.context.maxBpm) {
       return null;
     }
 
-    final variance = _variance(intervals, medianIntervalMs);
-    final confidence = (1 / (1 + variance / 500)).clamp(0.0, 1.0);
+    // Calculate variance of intervals (now in seconds)
+    final variance = _variance(intervals, medianIntervalSec);
+    // Adjust confidence calculation for seconds (variance will be smaller)
+    final confidence = (1 / (1 + variance / 0.5)).clamp(0.0, 1.0);
 
     return BpmReading(
       algorithmId: id,
@@ -88,22 +83,11 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       bpm: bpm,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
-      metadata: {'intervalVariance': variance},
+      metadata: {
+        'intervalVariance': variance,
+        'peakCount': peaks.length,
+      },
     );
-  }
-
-  List<double> _shortTimeEnergy(List<double> samples, int frameSize) {
-    final energies = <double>[];
-    for (var i = 0; i < samples.length; i += frameSize) {
-      final slice = samples.sublist(
-        i,
-        min(i + frameSize, samples.length),
-      );
-      final energy =
-          slice.fold<double>(0, (sum, sample) => sum + sample * sample);
-      energies.add(energy);
-    }
-    return _normalize(energies);
   }
 
   List<int> _detectPeaks(List<double> envelope) {
@@ -155,19 +139,6 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return sorted[mid];
     }
     return (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  List<double> _preprocessSamples(List<double> samples) {
-    if (samples.isEmpty) return const [];
-    const alpha = 0.975;
-    final result = List<double>.filled(samples.length, 0);
-    var previous = samples.first;
-    for (var i = 0; i < samples.length; i++) {
-      final current = samples[i] - alpha * previous;
-      result[i] = current;
-      previous = samples[i];
-    }
-    return result;
   }
 
   List<double> _smooth(List<double> values, int window) {

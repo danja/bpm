@@ -1,13 +1,17 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
-import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
+/// Wavelet-based BPM detection using Haar decomposition.
+///
+/// OPTIMIZED: Reduced from 4 levels to 2 for better performance (target <5s).
+/// Now uses pre-filtered signal from preprocessing pipeline.
 class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
   WaveletEnergyAlgorithm({
-    this.levels = 4,
+    this.levels = 2,  // Reduced from 4 to 2 for performance
   });
 
   final int levels;
@@ -23,19 +27,16 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
 
   @override
   Future<BpmReading?> analyze({
-    required List<AudioFrame> window,
-    required DetectionContext context,
+    required PreprocessedSignal signal,
   }) async {
-    if (window.isEmpty) return null;
+    // Use pre-filtered signal from preprocessing (already bandpassed and normalized)
+    final samples = List<double>.from(signal.filteredSamples);
 
-    final samples = SignalUtils.normalize(
-      window.expand((frame) => frame.samples).toList(),
-    );
-
-    if (samples.length < context.sampleRate ~/ 2) {
+    if (samples.length < signal.originalSampleRate ~/ 2) {
       return null;
     }
 
+    // Trim to power of 2 for wavelet decomposition
     final pow2 = SignalUtils.previousPowerOfTwo(samples.length);
     if (pow2 < 32) {
       return null;
@@ -76,9 +77,9 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       aggregatedWeight += weight;
 
       final minLag =
-          (context.sampleRate * 60 / context.maxBpm / scale).floor().clamp(1, normalized.length - 1);
+          (signal.context.sampleRate * 60 / signal.context.maxBpm / scale).floor().clamp(1, normalized.length - 1);
       final maxLag =
-          (context.sampleRate * 60 / context.minBpm / scale).floor().clamp(minLag + 1, normalized.length - 1);
+          (signal.context.sampleRate * 60 / signal.context.minBpm / scale).floor().clamp(minLag + 1, normalized.length - 1);
       if (minLag >= maxLag) continue;
 
       final lag = SignalUtils.dominantLag(
@@ -104,7 +105,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         bestLag = lag;
         bestScale = scale;
         bestLevel = level;
-        bestBpm = 60 * context.sampleRate / (lag * scale);
+        bestBpm = 60 * signal.context.sampleRate / (lag * scale);
         bestNormalized = upsampled;
         hasBestNormalized = true;
       }
@@ -138,7 +139,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       refine = _refineLag(
         detailBands[bestLevel],
         trimmed.length,
-        context,
+        signal,
       );
       final lagSamples = refine?.lagSamples ?? (bestLag * bestScale);
       final envelope = refine?.normalized ?? bestNormalized;
@@ -154,9 +155,9 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     double? aggregateScore;
     if (aggregatedNormalized != null) {
       final minLag =
-          (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, aggregatedNormalized.length - 1);
+          (signal.context.sampleRate * 60 / signal.context.maxBpm).floor().clamp(1, aggregatedNormalized.length - 1);
       final maxLag =
-          (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, aggregatedNormalized.length - 1);
+          (signal.context.sampleRate * 60 / signal.context.minBpm).floor().clamp(minLag + 1, aggregatedNormalized.length - 1);
       if (minLag < maxLag) {
         aggregateLag = SignalUtils.dominantLag(
           aggregatedNormalized,
@@ -197,7 +198,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final fallback = _fallbackLag(trimmed, context);
+    final fallback = _fallbackLag(trimmed, signal);
     var fallbackUsed = false;
     if (fallback != null) {
       final fallbackScore = SignalUtils.autocorrelation(
@@ -216,8 +217,8 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       }
     }
 
-    final resolvedBpm = 60 * context.sampleRate / finalLagSamples;
-    if (resolvedBpm < context.minBpm || resolvedBpm > context.maxBpm) {
+    final resolvedBpm = 60 * signal.context.sampleRate / finalLagSamples;
+    if (resolvedBpm < signal.context.minBpm || resolvedBpm > signal.context.maxBpm) {
       if (!usedAggregate &&
           aggregateLag != null &&
           aggregateScore != null &&
@@ -225,7 +226,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         finalEnvelope = aggregatedNormalized;
         finalLagSamples = aggregateLag;
         usedAggregate = true;
-      } else if (resolvedBpm < context.minBpm || resolvedBpm > context.maxBpm) {
+      } else if (resolvedBpm < signal.context.minBpm || resolvedBpm > signal.context.maxBpm) {
         return null;
       }
     }
@@ -238,7 +239,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     return BpmReading(
       algorithmId: id,
       algorithmName: label,
-      bpm: 60 * context.sampleRate / finalLagSamples,
+      bpm: 60 * signal.context.sampleRate / finalLagSamples,
       confidence: confidence,
       timestamp: DateTime.now().toUtc(),
       metadata: {
@@ -256,20 +257,20 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
 
 _LagResult? _fallbackLag(
   List<double> samples,
-  DetectionContext context,
+  PreprocessedSignal signal,
 ) {
   if (samples.isEmpty) return null;
 
   final envelope = samples.map((value) => value.abs()).toList();
-  final smoothingWindow = max(2, context.sampleRate ~/ 200);
+  final smoothingWindow = max(2, signal.context.sampleRate ~/ 200);
   final smoothed = _movingAverage(envelope, smoothingWindow);
   final normalized = SignalUtils.normalize(_removeDc(smoothed));
   if (normalized.every((value) => value == 0)) return null;
 
   final minLag =
-      (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, normalized.length - 1);
+      (signal.context.sampleRate * 60 / signal.context.maxBpm).floor().clamp(1, normalized.length - 1);
   final maxLag =
-      (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, normalized.length - 1);
+      (signal.context.sampleRate * 60 / signal.context.minBpm).floor().clamp(minLag + 1, normalized.length - 1);
   if (minLag >= maxLag) return null;
 
   final lag = SignalUtils.dominantLag(
@@ -312,7 +313,7 @@ _LagResult? _fallbackLag(
   _LagResult? _refineLag(
     List<double> detailBand,
     int targetLength,
-    DetectionContext context,
+    PreprocessedSignal signal,
   ) {
     if (detailBand.isEmpty || targetLength <= 0) return null;
 
@@ -323,9 +324,9 @@ _LagResult? _fallbackLag(
     if (normalized.every((value) => value == 0)) return null;
 
     final minLag =
-        (context.sampleRate * 60 / context.maxBpm).floor().clamp(1, normalized.length - 1);
+        (signal.context.sampleRate * 60 / signal.context.maxBpm).floor().clamp(1, normalized.length - 1);
     final maxLag =
-        (context.sampleRate * 60 / context.minBpm).floor().clamp(minLag + 1, normalized.length - 1);
+        (signal.context.sampleRate * 60 / signal.context.minBpm).floor().clamp(minLag + 1, normalized.length - 1);
     if (minLag >= maxLag) return null;
 
     final lag = SignalUtils.dominantLag(

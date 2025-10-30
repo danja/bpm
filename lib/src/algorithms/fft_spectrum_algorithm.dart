@@ -1,20 +1,22 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
-import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/dsp/fft_utils.dart';
+import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
+/// FFT-based tempo detection analyzing the energy envelope spectrum.
+///
+/// Now uses pre-downsampled 400Hz signal from preprocessing pipeline,
+/// eliminating redundant downsampling and improving performance.
 class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
   FftSpectrumAlgorithm({
     this.maxWindowSeconds = 6,
-    this.targetSampleRate = 400,
     this.minFftSize = 2048,
   });
 
   final int maxWindowSeconds;
-  final int targetSampleRate;
   final int minFftSize;
 
   @override
@@ -28,27 +30,17 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
 
   @override
   Future<BpmReading?> analyze({
-    required List<AudioFrame> window,
-    required DetectionContext context,
+    required PreprocessedSignal signal,
   }) async {
-    if (window.isEmpty) return null;
+    // Use pre-downsampled 400Hz signal from preprocessing
+    var samples = List<double>.from(signal.samples400Hz);
+    const effectiveSampleRate = 400; // Target sample rate from preprocessing
 
-    var samples = SignalUtils.normalize(
-      window.expand((frame) => frame.samples).toList(),
-    );
-
-    if (samples.length < context.sampleRate ~/ 2) {
+    if (samples.isEmpty || samples.length < 200) {
       return null;
     }
 
-    final decimation =
-        max(1, (context.sampleRate / targetSampleRate).ceil());
-    final effectiveSampleRate =
-        max(1, (context.sampleRate / decimation).round());
-    if (decimation > 1) {
-      samples = SignalUtils.downsample(samples, decimation);
-    }
-
+    // Create energy envelope
     final envelope = _energyEnvelope(samples);
     if (envelope.isEmpty ||
         envelope.every((value) => value == 0 || value.isNaN)) {
@@ -84,13 +76,14 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     var bestBpm = 0.0;
     var bestMagnitude = 0.0;
 
+    // Find peak in BPM range
     final minIndex = max(
       1,
-      (context.minBpm / 60 / freqResolution).ceil(),
+      (signal.context.minBpm / 60 / freqResolution).ceil(),
     );
     final maxIndex = min(
       spectrum.magnitudes.length - 1,
-      (context.maxBpm / 60 / freqResolution).floor(),
+      (signal.context.maxBpm / 60 / freqResolution).floor(),
     );
     if (maxIndex <= minIndex) {
       return null;
@@ -127,8 +120,9 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       timestamp: DateTime.now().toUtc(),
       metadata: {
         'fftSize': fftSize,
-        'decimation': decimation,
-        'effectiveSampleRate': effectiveSampleRate,
+        'sampleRate': effectiveSampleRate,
+        'peakMagnitude': bestMagnitude,
+        'avgMagnitude': averageMagnitude,
       },
     );
   }

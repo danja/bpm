@@ -1,0 +1,182 @@
+import 'dart:typed_data';
+
+import '../algorithms/detection_context.dart';
+import '../models/bpm_models.dart';
+import 'filtering.dart';
+import 'normalization.dart';
+import 'onset_detection.dart';
+import 'signal_utils.dart';
+
+/// Preprocessed signal with derived features for algorithm analysis.
+///
+/// Contains multiple representations of the audio signal optimized for
+/// different BPM detection algorithms, computed once and shared to avoid
+/// redundant processing.
+class PreprocessedSignal {
+  const PreprocessedSignal({
+    required this.rawSamples,
+    required this.normalizedSamples,
+    required this.filteredSamples,
+    required this.onsetEnvelope,
+    required this.samples8kHz,
+    required this.samples400Hz,
+    required this.originalSampleRate,
+    required this.duration,
+    required this.context,
+    required this.noiseFloor,
+  });
+
+  /// Original unprocessed samples
+  final Float32List rawSamples;
+
+  /// RMS-normalized samples (-18 dBFS target)
+  final Float32List normalizedSamples;
+
+  /// Bandpass filtered samples (20-1500 Hz, rhythmic content)
+  final Float32List filteredSamples;
+
+  /// Energy-based onset strength envelope
+  final Float32List onsetEnvelope;
+
+  /// Downsampled to 8 kHz (for autocorrelation)
+  final Float32List samples8kHz;
+
+  /// Downsampled to 400 Hz (for FFT tempo analysis)
+  final Float32List samples400Hz;
+
+  /// Original sample rate in Hz
+  final int originalSampleRate;
+
+  /// Duration of signal
+  final Duration duration;
+
+  /// Detection context (BPM range, etc.)
+  final DetectionContext context;
+
+  /// Estimated noise floor RMS
+  final double noiseFloor;
+
+  /// Number of samples in original signal
+  int get length => rawSamples.length;
+
+  /// Time scale for onset envelope (seconds per sample)
+  double get onsetTimeScale {
+    // Onset envelope is computed with 10ms hop, so ~100 samples per second
+    return 0.01; // 10ms hop size
+  }
+}
+
+/// Preprocessing pipeline that computes shared features for BPM detection.
+///
+/// Transforms raw audio frames into a PreprocessedSignal containing
+/// multiple optimized representations. This eliminates redundant computations
+/// across different algorithms.
+class PreprocessingPipeline {
+  const PreprocessingPipeline();
+
+  /// Processes audio frames into preprocessed signal.
+  ///
+  /// [window] - List of audio frames to process
+  /// [context] - Detection context (sample rate, BPM range, etc.)
+  ///
+  /// Returns PreprocessedSignal with computed features.
+  PreprocessedSignal process({
+    required List<AudioFrame> window,
+    required DetectionContext context,
+  }) {
+    // Concatenate all frame samples into single buffer
+    final allSamples = <double>[];
+    for (final frame in window) {
+      allSamples.addAll(frame.samples);
+    }
+
+    if (allSamples.isEmpty) {
+      return _emptySignal(context);
+    }
+
+    final rawSamples = Float32List.fromList(allSamples);
+    final sampleRate = window.first.sampleRate;
+    final duration = Duration(
+      microseconds: (rawSamples.length * 1000000 / sampleRate).round(),
+    );
+
+    // Step 1: Estimate noise floor before normalization
+    final noiseFloor = estimateNoiseFloor(rawSamples);
+
+    // Step 2: RMS Normalization to -18 dBFS
+    final normalized = normalizeRMS(rawSamples, targetDbFS: -18.0);
+
+    // Step 3: Remove DC offset and bandpass filter (20-1500 Hz)
+    final filtered = bandpassFilter(
+      normalized,
+      sampleRate,
+      lowCutoff: 20.0,
+      highCutoff: 1500.0,
+    );
+
+    // Step 4: Compute onset envelope (energy-based)
+    final onset = energyOnsetEnvelope(
+      filtered,
+      sampleRate,
+      frameSizeMs: 30.0,
+      hopSizeMs: 10.0,
+      smooth: true,
+    );
+
+    // Step 5: Create downsampled variants for efficiency
+    final samples8kHz = _downsampleTo(filtered, sampleRate, targetRate: 8000);
+    final samples400Hz = _downsampleTo(filtered, sampleRate, targetRate: 400);
+
+    return PreprocessedSignal(
+      rawSamples: rawSamples,
+      normalizedSamples: normalized,
+      filteredSamples: filtered,
+      onsetEnvelope: onset,
+      samples8kHz: samples8kHz,
+      samples400Hz: samples400Hz,
+      originalSampleRate: sampleRate,
+      duration: duration,
+      context: context,
+      noiseFloor: noiseFloor,
+    );
+  }
+
+  /// Downsamples signal to target sample rate.
+  Float32List _downsampleTo(
+    Float32List samples,
+    int currentRate, {
+    required int targetRate,
+  }) {
+    if (currentRate <= targetRate) {
+      return samples;
+    }
+
+    final factor = (currentRate / targetRate).round();
+    final downsampled = SignalUtils.downsample(
+      List<double>.from(samples),
+      factor,
+    );
+
+    return Float32List.fromList(downsampled);
+  }
+
+  /// Creates an empty preprocessed signal for edge cases.
+  PreprocessedSignal _emptySignal(DetectionContext context) {
+    final empty = Float32List(0);
+    return PreprocessedSignal(
+      rawSamples: empty,
+      normalizedSamples: empty,
+      filteredSamples: empty,
+      onsetEnvelope: empty,
+      samples8kHz: empty,
+      samples400Hz: empty,
+      originalSampleRate: context.sampleRate,
+      duration: Duration.zero,
+      context: context,
+      noiseFloor: 0.0,
+    );
+  }
+}
+
+/// Singleton instance for convenience.
+const preprocessingPipeline = PreprocessingPipeline();

@@ -1,18 +1,20 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
-import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
+/// Autocorrelation-based BPM detection using periodicity analysis.
+///
+/// Now uses pre-downsampled 8kHz signal from preprocessing pipeline,
+/// improving performance by eliminating redundant downsampling.
 class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   AutocorrelationAlgorithm({
     this.maxAnalysisSeconds = 4,
-    this.targetSampleRate = 8000,
   });
 
   final int maxAnalysisSeconds;
-  final int targetSampleRate;
 
   @override
   String get id => 'autocorrelation';
@@ -25,41 +27,33 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
 
   @override
   Future<BpmReading?> analyze({
-    required List<AudioFrame> window,
-    required DetectionContext context,
+    required PreprocessedSignal signal,
   }) async {
-    if (window.isEmpty) return null;
-    final flattened = window.expand((frame) => frame.samples).toList();
-    if (flattened.length < context.sampleRate ~/ 2) {
+    // Use pre-downsampled 8kHz signal from preprocessing
+    var samples = List<double>.from(signal.samples8kHz);
+    const effectiveSampleRate = 8000; // Target sample rate from preprocessing
+
+    if (samples.isEmpty || samples.length < effectiveSampleRate) {
       return null;
     }
 
-    final maxSamples =
-        min(flattened.length, context.sampleRate * maxAnalysisSeconds);
-    var samples = flattened.sublist(0, maxSamples);
-
-    final decimationFactor =
-        max(1, (context.sampleRate / targetSampleRate).ceil());
-    final effectiveSampleRate =
-        max(1, (context.sampleRate / decimationFactor).round());
-
-    if (decimationFactor > 1) {
-      samples = SignalUtils.downsample(samples, decimationFactor);
+    // Limit analysis duration
+    final maxSamples = min(samples.length, effectiveSampleRate * maxAnalysisSeconds);
+    if (maxSamples < samples.length) {
+      samples = samples.sublist(0, maxSamples);
     }
 
-    if (samples.length < effectiveSampleRate) {
-      return null;
-    }
-
+    // Normalize (preprocessing already removed DC and normalized, but ensure clean signal)
     samples = SignalUtils.normalize(SignalUtils.removeMean(samples));
     if (samples.every((value) => value == 0)) {
       return null;
     }
 
+    // Calculate lag range based on BPM bounds
     final theoreticalMinLag =
-        (effectiveSampleRate * 60 / context.maxBpm).floor();
+        (effectiveSampleRate * 60 / signal.context.maxBpm).floor();
     final theoreticalMaxLag =
-        (effectiveSampleRate * 60 / context.minBpm).ceil();
+        (effectiveSampleRate * 60 / signal.context.minBpm).ceil();
 
     final minLag = max(1, theoreticalMinLag);
     final maxLag = min(samples.length - 1, theoreticalMaxLag);
@@ -113,7 +107,7 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
         'lag': bestLag,
         'evaluations': evaluations,
         'coarseStride': coarseStride,
-        'decimation': decimationFactor,
+        'sampleRate': effectiveSampleRate,
         'analysisSeconds': samples.length / effectiveSampleRate,
       },
     );
