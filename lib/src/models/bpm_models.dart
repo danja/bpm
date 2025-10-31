@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:equatable/equatable.dart';
 
 /// Operational status for BPM detection flow.
@@ -66,6 +68,34 @@ class ConsensusResult extends Equatable {
   List<Object?> get props => [bpm, confidence];
 }
 
+class TempogramSnapshot extends Equatable {
+  const TempogramSnapshot({
+    required this.matrix,
+    required this.tempoAxis,
+    required this.times,
+    required this.dominantTempo,
+    required this.dominantStrength,
+  });
+
+  final List<Float32List> matrix;
+  final Float32List tempoAxis;
+  final Float32List times;
+  final Float32List dominantTempo;
+  final Float32List dominantStrength;
+
+  double? get latestTempo =>
+      dominantTempo.isEmpty ? null : dominantTempo[dominantTempo.length - 1];
+
+  double? get latestStrength => dominantStrength.isEmpty
+      ? null
+      : dominantStrength[dominantStrength.length - 1];
+
+  bool get isEmpty => matrix.isEmpty || tempoAxis.isEmpty || times.isEmpty;
+
+  @override
+  List<Object?> get props => [matrix, tempoAxis, times, dominantTempo, dominantStrength];
+}
+
 /// Snapshot of the detection pipeline for presentation/state management.
 class BpmSummary extends Equatable {
   const BpmSummary({
@@ -74,6 +104,10 @@ class BpmSummary extends Equatable {
     this.consensus,
     this.message,
     this.previewSamples = const [],
+    this.plpBpm,
+    this.plpStrength,
+    this.plpTrace = const <double>[],
+    this.tempogram,
   });
 
   final DetectionStatus status;
@@ -81,14 +115,29 @@ class BpmSummary extends Equatable {
   final ConsensusResult? consensus;
   final String? message;
   final List<double> previewSamples;
+  final double? plpBpm;
+  final double? plpStrength;
+  final List<double> plpTrace;
+  final TempogramSnapshot? tempogram;
 
   @override
-  List<Object?> get props => [status, readings, consensus, message, previewSamples];
+  List<Object?> get props => [
+        status,
+        readings,
+        consensus,
+        message,
+        previewSamples,
+        plpBpm,
+        plpStrength,
+        plpTrace,
+        tempogram,
+      ];
 
   factory BpmSummary.idle() => const BpmSummary(
         status: DetectionStatus.idle,
         readings: [],
         previewSamples: [],
+        plpTrace: const <double>[],
       );
 }
 

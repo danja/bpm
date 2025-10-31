@@ -39,6 +39,11 @@ void main() {
     expect(signal.samples8kHz.length, greaterThan(0));
     expect(signal.samples400Hz.length, greaterThan(0));
     expect(signal.originalSampleRate, sampleRate);
+    expect(signal.tempogram.isNotEmpty, isTrue);
+    expect(signal.tempoAxis.length, greaterThan(0));
+    expect(signal.tempogramTimes.length, signal.tempogram.length);
+    expect(signal.dominantTempoCurve.length, signal.tempogram.length);
+    expect(signal.dominantTempoStrength.length, signal.tempogram.length);
 
     // Verify downsampling ratios are reasonable
     final ratio8k = signal.rawSamples.length / signal.samples8kHz.length;

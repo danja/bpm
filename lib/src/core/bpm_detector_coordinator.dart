@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
@@ -16,6 +17,8 @@ import 'package:bpm/src/dsp/signal_utils.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/utils/app_logger.dart';
 import 'package:flutter/foundation.dart';
+
+final Float32List _emptyFloat32 = Float32List(0);
 
 class BpmDetectorCoordinator {
   BpmDetectorCoordinator({
@@ -37,6 +40,13 @@ class BpmDetectorCoordinator {
   List<BpmReading> _latestReadings = const [];
   ConsensusResult? _latestConsensus;
   BpmReading? _lastWaveletReading;
+  double? _latestPlpBpm;
+  double? _latestPlpStrength;
+  Float32List? _latestPlpTrace;
+  Float32List? _latestPlpStrengthTrace;
+  Float32List? _latestTempoAxis;
+  Float32List? _latestTempogramTimes;
+  List<Float32List> _latestTempogramMatrix = const [];
 
   Stream<BpmSummary> start({
     required AudioStreamConfig streamConfig,
@@ -55,6 +65,13 @@ class BpmDetectorCoordinator {
     _lastWaveletReading = null;
     _waveletRunning = false;
     _lastWaveletRun = null;
+    _latestPlpBpm = null;
+    _latestPlpStrength = null;
+    _latestPlpTrace = null;
+    _latestPlpStrengthTrace = null;
+    _latestTempoAxis = null;
+    _latestTempogramTimes = null;
+    _latestTempogramMatrix = const [];
     _logger.info('Consensus engine and coordinator state reset', source: 'Coordinator');
 
     yield BpmSummary(
@@ -149,6 +166,10 @@ class BpmDetectorCoordinator {
               readings: _latestReadings,
               consensus: _latestConsensus,
               previewSamples: _waveformSnapshot(waveform),
+              plpBpm: _latestPlpBpm,
+              plpStrength: _latestPlpStrength,
+              plpTrace: _currentPlpTrace(),
+              tempogram: _buildTempogramSnapshot(),
             ),
           );
         }
@@ -186,6 +207,10 @@ class BpmDetectorCoordinator {
             readings: _latestReadings,
             consensus: _latestConsensus,
             previewSamples: _waveformSnapshot(waveform),
+            plpBpm: _latestPlpBpm,
+            plpStrength: _latestPlpStrength,
+            plpTrace: _currentPlpTrace(),
+            tempogram: _buildTempogramSnapshot(),
           ),
         );
 
@@ -214,9 +239,9 @@ class BpmDetectorCoordinator {
                 .toList()
             : registry.algorithms.map((algorithm) => algorithm.id).toList();
 
-        List<BpmReading> readings = [];
+        Map<String, Object?> isolateResult = const {};
         try {
-          readings = await compute(
+          isolateResult = await compute(
             _runAlgorithmsInIsolate,
             _AlgorithmParams(
               frames: windowFrames,
@@ -229,12 +254,50 @@ class BpmDetectorCoordinator {
               _logger.warning(
                   'Algorithm timeout after 5s, using partial results',
                   source: 'Coordinator');
-              return <BpmReading>[];
+              return const <String, Object?>{
+                'readings': <BpmReading>[],
+              };
             },
           );
         } catch (e) {
           _logger.error('Algorithm error: $e', source: 'Coordinator');
-          readings = [];
+          isolateResult = const {
+            'readings': <BpmReading>[],
+          };
+        }
+
+        final readings = (isolateResult['readings'] as List?)
+                ?.whereType<BpmReading>()
+                .toList() ??
+            <BpmReading>[];
+        final plpBpm = isolateResult['plpBpm'] as double?;
+        final plpStrength = isolateResult['plpStrength'] as double?;
+        final plpTrace = isolateResult['plpTrace'] as Float32List?;
+        final plpStrengthTrace = isolateResult['plpStrengthTrace'] as Float32List?;
+        final tempoAxis = isolateResult['tempoAxis'] as Float32List?;
+        final tempogramTimes = isolateResult['tempogramTimes'] as Float32List?;
+        final tempogramMatrix = isolateResult['tempogramMatrix'] as List<Float32List>?;
+
+        if (tempoAxis != null && tempoAxis.isNotEmpty) {
+          _latestTempoAxis = tempoAxis;
+        }
+        if (tempogramTimes != null && tempogramTimes.isNotEmpty) {
+          _latestTempogramTimes = tempogramTimes;
+        }
+        if (tempogramMatrix != null && tempogramMatrix.isNotEmpty) {
+          _latestTempogramMatrix = tempogramMatrix;
+        }
+        if (plpTrace != null && plpTrace.isNotEmpty) {
+          _latestPlpTrace = plpTrace;
+        }
+        if (plpStrengthTrace != null && plpStrengthTrace.isNotEmpty) {
+          _latestPlpStrengthTrace = plpStrengthTrace;
+        }
+        if (plpBpm != null && plpBpm > 0) {
+          _latestPlpBpm = plpBpm;
+        }
+        if (plpStrength != null) {
+          _latestPlpStrength = plpStrength.clamp(0.0, 1.0);
         }
 
         _logger.info(
@@ -252,13 +315,32 @@ class BpmDetectorCoordinator {
           }
         }
 
-        final filtered = readings.whereType<BpmReading>().toList();
+        final filtered = readings.toList();
+
+        final consensusInputs = List<BpmReading>.from(filtered);
+        if (_latestPlpBpm != null && _latestPlpBpm! > 0) {
+          final double strength = (_latestPlpStrength ?? 0).clamp(0.0, 1.0);
+          final plpConfidence = (0.4 + 0.45 * strength).clamp(0.0, 0.85);
+          final plpReading = BpmReading(
+            algorithmId: 'plp_tempogram',
+            algorithmName: 'Tempogram PLP',
+            bpm: _latestPlpBpm!.clamp(context.minBpm, context.maxBpm),
+            confidence: plpConfidence,
+            timestamp: DateTime.now().toUtc(),
+            metadata: {
+              'source': 'tempogram',
+              'strength': strength,
+            },
+          );
+          consensusInputs.add(plpReading);
+        }
+
         final displayReadings = List<BpmReading>.from(filtered);
         if (_lastWaveletReading != null) {
           displayReadings.add(_lastWaveletReading!);
         }
         _latestReadings = displayReadings;
-        _latestConsensus = consensusEngine.combine(displayReadings);
+        _latestConsensus = consensusEngine.combine(consensusInputs);
 
         if (_latestConsensus != null) {
           _logger.info(
@@ -276,6 +358,10 @@ class BpmDetectorCoordinator {
             readings: _latestReadings,
             consensus: _latestConsensus,
             previewSamples: _waveformSnapshot(waveform),
+            plpBpm: _latestPlpBpm,
+            plpStrength: _latestPlpStrength,
+            plpTrace: _currentPlpTrace(),
+            tempogram: _buildTempogramSnapshot(),
           ),
         );
 
@@ -349,13 +435,20 @@ class BpmDetectorCoordinator {
 
     Future<void>.delayed(const Duration(milliseconds: 150), () async {
       try {
-        final readings = await compute(
+        final isolateWavelet = await compute(
           _runAlgorithmsInIsolate,
           params,
         ).timeout(
           const Duration(seconds: 8),
-          onTimeout: () => <BpmReading>[],
+          onTimeout: () => const <String, Object?>{
+            'readings': <BpmReading>[],
+          },
         );
+
+        final readings = (isolateWavelet['readings'] as List?)
+                ?.whereType<BpmReading>()
+                .toList() ??
+            <BpmReading>[];
 
         if (readings.isEmpty) {
           return;
@@ -379,7 +472,27 @@ class BpmDetectorCoordinator {
 
         final mergedWithWavelet = List<BpmReading>.from(merged);
         _latestReadings = mergedWithWavelet;
-        _latestConsensus = consensusEngine.combine(mergedWithWavelet) ?? baseConsensus;
+        final consensusInputs = List<BpmReading>.from(mergedWithWavelet);
+        if (_latestPlpBpm != null && _latestPlpBpm! > 0) {
+          final strength = (_latestPlpStrength ?? 0).clamp(0.0, 1.0);
+          final plpConfidence = (0.4 + 0.45 * strength).clamp(0.0, 0.85);
+          consensusInputs.add(
+            BpmReading(
+              algorithmId: 'plp_tempogram',
+              algorithmName: 'Tempogram PLP',
+              bpm: _latestPlpBpm!.clamp(context.minBpm, context.maxBpm),
+              confidence: plpConfidence,
+              timestamp: DateTime.now().toUtc(),
+              metadata: {
+                'source': 'tempogram',
+                'strength': strength,
+              },
+            ),
+          );
+        }
+
+        _latestConsensus =
+            consensusEngine.combine(consensusInputs) ?? baseConsensus;
 
         if (!controller.isClosed) {
           controller.add(
@@ -388,6 +501,10 @@ class BpmDetectorCoordinator {
               readings: merged,
               consensus: _latestConsensus,
               previewSamples: waveforms,
+              plpBpm: _latestPlpBpm,
+              plpStrength: _latestPlpStrength,
+              plpTrace: _currentPlpTrace(),
+              tempogram: _buildTempogramSnapshot(),
             ),
           );
         }
@@ -397,6 +514,37 @@ class BpmDetectorCoordinator {
         _waveletRunning = false;
       }
     });
+  }
+
+  TempogramSnapshot? _buildTempogramSnapshot() {
+    if (_latestTempoAxis == null ||
+        _latestTempogramTimes == null ||
+        _latestPlpTrace == null ||
+        _latestTempogramMatrix.isEmpty) {
+      return null;
+    }
+    final dominant = _latestPlpTrace!;
+    Float32List strength = _emptyFloat32;
+    if (_latestPlpStrengthTrace != null &&
+        _latestPlpStrengthTrace!.isNotEmpty) {
+      strength = _latestPlpStrengthTrace!;
+    } else if (dominant.isNotEmpty) {
+      strength = Float32List(dominant.length);
+    }
+    return TempogramSnapshot(
+      matrix: _latestTempogramMatrix,
+      tempoAxis: _latestTempoAxis!,
+      times: _latestTempogramTimes!,
+      dominantTempo: dominant,
+      dominantStrength: strength,
+    );
+  }
+
+  List<double> _currentPlpTrace() {
+    if (_latestPlpTrace == null || _latestPlpTrace!.isEmpty) {
+      return const [];
+    }
+    return _latestPlpTrace!.toList(growable: false);
   }
 }
 
@@ -502,7 +650,7 @@ class _AlgorithmParams {
 }
 
 // Top-level function for isolate (must be top-level or static)
-Future<List<BpmReading>> _runAlgorithmsInIsolate(
+Future<Map<String, Object?>> _runAlgorithmsInIsolate(
     _AlgorithmParams params) async {
   final results = <BpmReading>[];
 
@@ -510,7 +658,9 @@ Future<List<BpmReading>> _runAlgorithmsInIsolate(
   final totalSamples =
       params.frames.fold<int>(0, (sum, frame) => sum + frame.samples.length);
   if (totalSamples == 0) {
-    return results; // No audio data
+    return {
+      'readings': results,
+    };
   }
 
   // PHASE 1: Run preprocessing pipeline ONCE for all algorithms
@@ -523,7 +673,9 @@ Future<List<BpmReading>> _runAlgorithmsInIsolate(
     );
   } catch (e) {
     // Preprocessing failed, return empty results
-    return results;
+    return {
+      'readings': results,
+    };
   }
 
   // PHASE 2: Run each algorithm on the preprocessed signal
@@ -562,5 +714,27 @@ Future<List<BpmReading>> _runAlgorithmsInIsolate(
     }
   }
 
-  return results;
+  double? plpBpm;
+  double? plpStrength;
+  Float32List? plpTrace;
+  final dominantTrace = signal.dominantTempoCurve;
+  if (dominantTrace.isNotEmpty) {
+    plpTrace = dominantTrace;
+    plpBpm = dominantTrace[dominantTrace.length - 1];
+    final strengthTrace = signal.dominantTempoStrength;
+    if (strengthTrace.isNotEmpty) {
+      plpStrength = strengthTrace[strengthTrace.length - 1];
+    }
+  }
+
+  return {
+    'readings': results,
+    'plpBpm': plpBpm,
+    'plpStrength': plpStrength,
+    'plpTrace': plpTrace,
+    'plpStrengthTrace': signal.dominantTempoStrength,
+    'tempoAxis': signal.tempoAxis,
+    'tempogramTimes': signal.tempogramTimes,
+    'tempogramMatrix': signal.tempogram,
+  };
 }

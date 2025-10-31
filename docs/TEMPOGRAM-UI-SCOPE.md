@@ -69,6 +69,7 @@ Key mechanics to translate:
    - [ ] Unit-test tempogram generation vs. MATLAB baseline (sample WAVs).
    - [ ] Golden tests for the painter using deterministic tempogram fixtures.
    - [ ] Integration test: drive preprocessing pipeline on sample audio, assert snapshot fields.
+   - [ ] End-to-end widget test ensuring elapsed clock + tempogram view coexist without layout regressions.
 
 ## Acceptance Criteria
 

@@ -11,6 +11,13 @@ class BpmSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final consensus = state.consensus;
     final textTheme = Theme.of(context).textTheme;
+    final plpPanel = state.plpBpm != null
+        ? _PlpPanel(
+            bpm: state.plpBpm!,
+            strength: state.plpStrength,
+            trace: state.plpTrace,
+          )
+        : null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -19,6 +26,10 @@ class BpmSummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ..._algorithmRows(context),
+            if (plpPanel != null) ...[
+              const SizedBox(height: 8),
+              plpPanel,
+            ],
             const Divider(height: 20),
             Text('Consensus BPM', style: textTheme.titleMedium),
             const SizedBox(height: 4),
@@ -112,16 +123,103 @@ class BpmSummaryCard extends StatelessWidget {
                     value: confidence.clamp(0.0, 1.0),
                     minHeight: 4,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Confidence ${(confidence * 100).toStringAsFixed(0)}%',
-                    style: textTheme.bodySmall,
-                  ),
                 ],
               ),
             );
           },
         )
         .toList();
+  }
+}
+
+class _PlpPanel extends StatelessWidget {
+  const _PlpPanel({
+    required this.bpm,
+    this.strength,
+    required this.trace,
+  });
+
+  final double bpm;
+  final double? strength;
+  final List<double> trace;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recent = trace.isNotEmpty ? trace[trace.length - 1] : null;
+    final sampleCount = trace.length;
+    final startIndex = sampleCount > 20 ? sampleCount - 20 : 0;
+    double? minValue;
+    double? maxValue;
+    for (var i = startIndex; i < sampleCount; i++) {
+      final value = trace[i];
+      minValue = minValue == null ? value : value < minValue ? value : minValue;
+      maxValue = maxValue == null ? value : value > maxValue ? value : maxValue;
+    }
+    final strengthPercent = strength == null
+        ? null
+        : (strength!.clamp(0.0, 1.0) * 100).toStringAsFixed(0);
+
+    String rangeText;
+    if (minValue != null && maxValue != null && (maxValue - minValue) > 0.1) {
+      rangeText =
+          'Range ≈ ${minValue.toStringAsFixed(0)} – ${maxValue.toStringAsFixed(0)} BPM';
+    } else {
+      rangeText = 'Stable at ${recent?.toStringAsFixed(1) ?? bpm.toStringAsFixed(1)} BPM';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Predominant Pulse (PLP)',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: theme.colorScheme.onSecondaryContainer,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                bpm.toStringAsFixed(1),
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'BPM',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+              ),
+              if (strengthPercent != null) ...[
+                const SizedBox(width: 12),
+                Text(
+                  'Strength $strengthPercent%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            rangeText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSecondaryContainer.withOpacity(0.8),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -9,6 +9,7 @@ import 'novelty.dart';
 import 'normalization.dart';
 import 'onset_detection.dart';
 import 'signal_utils.dart';
+import 'tempogram.dart';
 
 /// Preprocessed signal with derived features for algorithm analysis.
 ///
@@ -27,6 +28,11 @@ class PreprocessedSignal {
     required this.melBandMeans,
     required this.noveltyCurve,
     required this.noveltyFeatureRate,
+    required this.tempogram,
+    required this.tempoAxis,
+    required this.tempogramTimes,
+    required this.dominantTempoCurve,
+    required this.dominantTempoStrength,
     required this.originalSampleRate,
     required this.duration,
     required this.context,
@@ -63,6 +69,19 @@ class PreprocessedSignal {
   /// Feature rate of novelty curve (Hz)
   final double noveltyFeatureRate;
 
+  /// Tempogram magnitude matrix (rows=time, cols=tempo bins)
+  final List<Float32List> tempogram;
+
+  /// Tempo axis for tempogram (BPM)
+  final Float32List tempoAxis;
+
+  /// Time axis for tempogram frames (seconds)
+  final Float32List tempogramTimes;
+
+  /// Dominant tempo per frame (BPM)
+  final Float32List dominantTempoCurve;
+  final Float32List dominantTempoStrength;
+
   /// Original sample rate in Hz
   final int originalSampleRate;
 
@@ -94,6 +113,7 @@ class PreprocessingPipeline {
   const PreprocessingPipeline();
 
   static final NoveltyComputer _noveltyComputer = NoveltyComputer();
+  static final TempogramComputer _tempogramComputer = TempogramComputer();
 
   /// Processes audio frames into preprocessed signal.
   ///
@@ -165,6 +185,16 @@ class PreprocessingPipeline {
       context: context,
     );
 
+    TempogramResult? tempogram;
+    if (novelty.curve.isNotEmpty && novelty.featureRate > 0) {
+      tempogram = _tempogramComputer.compute(
+        noveltyCurve: novelty.curve,
+        featureRate: novelty.featureRate,
+        minBpm: context.minBpm,
+        maxBpm: context.maxBpm,
+      );
+    }
+
     return PreprocessedSignal(
       rawSamples: rawSamples,
       normalizedSamples: normalized,
@@ -176,6 +206,11 @@ class PreprocessingPipeline {
       melBandMeans: melFeatures.meanBands,
       noveltyCurve: novelty.curve,
       noveltyFeatureRate: novelty.featureRate,
+      tempogram: tempogram?.matrix ?? const [],
+      tempoAxis: tempogram?.tempoAxis ?? Float32List(0),
+      tempogramTimes: tempogram?.times ?? Float32List(0),
+      dominantTempoCurve: tempogram?.dominantTempo ?? Float32List(0),
+      dominantTempoStrength: tempogram?.dominantStrength ?? Float32List(0),
       originalSampleRate: sampleRate,
       duration: duration,
       context: context,
@@ -216,6 +251,11 @@ class PreprocessingPipeline {
       melBandMeans: Float32List(0),
       noveltyCurve: empty,
       noveltyFeatureRate: 0,
+      tempogram: const [],
+      tempoAxis: Float32List(0),
+      tempogramTimes: Float32List(0),
+      dominantTempoCurve: Float32List(0),
+      dominantTempoStrength: Float32List(0),
       originalSampleRate: context.sampleRate,
       duration: Duration.zero,
       context: context,

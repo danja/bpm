@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:equatable/equatable.dart';
 
 import 'package:bpm/src/models/bpm_models.dart';
@@ -12,6 +14,10 @@ class BpmState extends Equatable {
     this.previewSamples = const [],
     this.startedAt,
     this.elapsed = Duration.zero,
+    this.plpBpm,
+    this.plpStrength,
+    this.plpTrace = const <double>[],
+    this.tempogram,
   });
 
   final DetectionStatus status;
@@ -22,6 +28,10 @@ class BpmState extends Equatable {
   final List<double> previewSamples;
   final DateTime? startedAt;
   final Duration elapsed;
+  final double? plpBpm;
+  final double? plpStrength;
+  final List<double> plpTrace;
+  final TempogramSnapshot? tempogram;
 
   factory BpmState.initial() => const BpmState(
         status: DetectionStatus.idle,
@@ -43,6 +53,11 @@ class BpmState extends Equatable {
     DateTime? startedAt,
     bool resetStartTime = false,
     Duration? elapsed,
+    double? plpBpm,
+    double? plpStrength,
+    List<double>? plpTrace,
+    TempogramSnapshot? tempogram,
+    bool clearTempogram = false,
   }) {
     return BpmState(
       status: status ?? this.status,
@@ -55,10 +70,27 @@ class BpmState extends Equatable {
       elapsed: resetStartTime
           ? Duration.zero
           : (elapsed ?? this.elapsed),
+      plpBpm: plpBpm ?? this.plpBpm,
+      plpStrength: plpStrength ?? this.plpStrength,
+      plpTrace: plpTrace ?? this.plpTrace,
+      tempogram: clearTempogram ? null : (tempogram ?? this.tempogram),
     );
   }
 
   @override
   List<Object?> get props =>
-      [status, readings, consensus, message, history, previewSamples, startedAt, elapsed];
+      [
+        status,
+        readings,
+        consensus,
+        message,
+        history,
+        previewSamples,
+        startedAt,
+        elapsed,
+        plpBpm,
+        plpStrength,
+        plpTrace,
+        tempogram,
+      ];
 }

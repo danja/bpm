@@ -32,6 +32,7 @@ class BpmCubit extends Cubit<BpmState> {
         clearConsensus: true,
         startedAt: startedAt,
         elapsed: Duration.zero,
+        clearTempogram: true,
       ),
     );
     _startElapsedTicker();
@@ -53,6 +54,11 @@ class BpmCubit extends Cubit<BpmState> {
                   summary.consensus != null ? blendedConsensus : null,
                 ),
                 previewSamples: summary.previewSamples,
+                plpBpm: summary.plpBpm,
+                plpStrength: summary.plpStrength,
+                plpTrace: summary.plpTrace,
+                tempogram: summary.tempogram,
+                clearTempogram: summary.tempogram == null,
               ),
             );
           },
