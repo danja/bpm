@@ -13,7 +13,7 @@ import 'package:bpm/src/models/bpm_models.dart';
 /// Now uses pre-filtered signal from preprocessing pipeline.
 class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
   WaveletEnergyAlgorithm({
-    this.levels = 2,  // Reduced from 4 to 2 for performance
+    this.levels = 2, // Reduced from 4 to 2 for performance
   });
 
   final int levels;
@@ -38,12 +38,9 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     var samples = List<double>.from(baseSamples);
 
     final contextSampleRate = signal.context.sampleRate.toDouble();
-    final durationSeconds =
-        signal.duration.inMicroseconds > 0
-            ? signal.duration.inMicroseconds / 1e6
-            : (samples.isNotEmpty
-                ? samples.length / contextSampleRate
-                : 0);
+    final durationSeconds = signal.duration.inMicroseconds > 0
+        ? signal.duration.inMicroseconds / 1e6
+        : (samples.isNotEmpty ? samples.length / contextSampleRate : 0);
     final effectiveSampleRate = (durationSeconds > 0 && samples.isNotEmpty)
         ? samples.length / durationSeconds
         : contextSampleRate;
@@ -92,14 +89,12 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       }
       aggregatedWeight += weight;
 
-      final minLag =
-          (effectiveSampleRate * 60 / signal.context.maxBpm / scale)
-              .floor()
-              .clamp(1, normalized.length - 1);
-      final maxLag =
-          (effectiveSampleRate * 60 / signal.context.minBpm / scale)
-              .floor()
-              .clamp(minLag + 1, normalized.length - 1);
+      final minLag = (effectiveSampleRate * 60 / signal.context.maxBpm / scale)
+          .floor()
+          .clamp(1, normalized.length - 1);
+      final maxLag = (effectiveSampleRate * 60 / signal.context.minBpm / scale)
+          .floor()
+          .clamp(minLag + 1, normalized.length - 1);
       if (minLag >= maxLag) continue;
 
       final lag = SignalUtils.dominantLag(
@@ -175,14 +170,12 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     int? aggregateLag;
     double? aggregateScore;
     if (aggregatedNormalized != null) {
-      final minLag =
-          (effectiveSampleRate * 60 / signal.context.maxBpm)
-              .floor()
-              .clamp(1, aggregatedNormalized.length - 1);
-      final maxLag =
-          (effectiveSampleRate * 60 / signal.context.minBpm)
-              .floor()
-              .clamp(minLag + 1, aggregatedNormalized.length - 1);
+      final minLag = (effectiveSampleRate * 60 / signal.context.maxBpm)
+          .floor()
+          .clamp(1, aggregatedNormalized.length - 1);
+      final maxLag = (effectiveSampleRate * 60 / signal.context.minBpm)
+          .floor()
+          .clamp(minLag + 1, aggregatedNormalized.length - 1);
       if (minLag < maxLag) {
         aggregateLag = SignalUtils.dominantLag(
           aggregatedNormalized,
@@ -249,27 +242,32 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     final resolvedBpm = 60 * effectiveSampleRate / finalLagSamples;
 
     final candidates = <TempoCandidate>[
-      TempoCandidate(bpm: resolvedBpm, weight: 1.0, source: 'resolved'),
+      TempoCandidate(
+        bpm: resolvedBpm,
+        weight: 1.0,
+        source: 'resolved',
+        allowHarmonics: false,
+      ),
     ];
     if (aggregateLag != null && aggregateLag > 0) {
-      final aggregateBpm =
-          60 * effectiveSampleRate / aggregateLag;
+      final aggregateBpm = 60 * effectiveSampleRate / aggregateLag;
       candidates.add(
         TempoCandidate(
           bpm: aggregateBpm,
           weight: 0.75,
           source: 'aggregate',
+          allowHarmonics: false,
         ),
       );
     }
     if (fallback != null) {
-      final fallbackBpm =
-          60 * effectiveSampleRate / fallback.lagSamples;
+      final fallbackBpm = 60 * effectiveSampleRate / fallback.lagSamples;
       candidates.add(
         TempoCandidate(
           bpm: fallbackBpm,
           weight: 0.6,
           source: 'fallback',
+          allowHarmonics: false,
         ),
       );
     }
@@ -278,13 +276,13 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         final lagSamples = entry['lagSamples'] as int? ?? 0;
         if (lagSamples <= 0) continue;
         final score = (entry['weightedScore'] as num?)?.toDouble() ?? 0.0;
-        final diagBpm =
-            60 * effectiveSampleRate / lagSamples;
+        final diagBpm = 60 * effectiveSampleRate / lagSamples;
         candidates.add(
           TempoCandidate(
             bpm: diagBpm,
             weight: score.clamp(0.1, 1.0),
             source: 'diag_level_${entry['level']}',
+            allowHarmonics: false,
           ),
         );
       }
@@ -323,13 +321,14 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     ).abs();
     final candidateStrength = (candidateScore ?? 0).abs();
     final aggregateStrength = (aggregateScore ?? 0).abs();
-    final envelopeStrength =
-        [finalScore * 3.0, candidateStrength * 2.4, aggregateStrength * 2.0]
-            .reduce(max)
-            .clamp(0.0, 1.0);
+    final envelopeStrength = [
+      finalScore * 3.0,
+      candidateStrength * 2.4,
+      aggregateStrength * 2.0
+    ].reduce(max).clamp(0.0, 1.0);
 
-    final confidence = (0.55 * envelopeStrength + 0.45 * harmonicPenalty)
-        .clamp(0.0, 1.0);
+    final confidence =
+        (0.55 * envelopeStrength + 0.45 * harmonicPenalty).clamp(0.0, 1.0);
     final metadata = <String, Object?>{
       'lagSamples': finalLagSamples,
       'level': usedAggregate ? -1 : bestLevel,
@@ -372,41 +371,39 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     );
   }
 
-_LagResult? _fallbackLag(
-  List<double> samples,
-  DetectionContext context,
-  double sampleRate,
-) {
-  if (samples.isEmpty) return null;
+  _LagResult? _fallbackLag(
+    List<double> samples,
+    DetectionContext context,
+    double sampleRate,
+  ) {
+    if (samples.isEmpty) return null;
 
-  final envelope = samples.map((value) => value.abs()).toList();
-  final smoothingWindow = max(2, (sampleRate / 200).round());
-  final smoothed = _movingAverage(envelope, smoothingWindow);
-  final normalized = SignalUtils.normalize(_removeDc(smoothed));
-  if (normalized.every((value) => value == 0)) return null;
+    final envelope = samples.map((value) => value.abs()).toList();
+    final smoothingWindow = max(2, (sampleRate / 200).round());
+    final smoothed = _movingAverage(envelope, smoothingWindow);
+    final normalized = SignalUtils.normalize(_removeDc(smoothed));
+    if (normalized.every((value) => value == 0)) return null;
 
-  final minLag =
-      (sampleRate * 60 / context.maxBpm)
-          .floor()
-          .clamp(1, normalized.length - 1);
-  final maxLag =
-      (sampleRate * 60 / context.minBpm)
-          .floor()
-          .clamp(minLag + 1, normalized.length - 1);
-  if (minLag >= maxLag) return null;
+    final minLag = (sampleRate * 60 / context.maxBpm)
+        .floor()
+        .clamp(1, normalized.length - 1);
+    final maxLag = (sampleRate * 60 / context.minBpm)
+        .floor()
+        .clamp(minLag + 1, normalized.length - 1);
+    if (minLag >= maxLag) return null;
 
-  final lag = SignalUtils.dominantLag(
-    normalized,
-    minLag: minLag,
-    maxLag: maxLag,
-  );
-  if (lag == null) return null;
+    final lag = SignalUtils.dominantLag(
+      normalized,
+      minLag: minLag,
+      maxLag: maxLag,
+    );
+    if (lag == null) return null;
 
-  return _LagResult(
-    lagSamples: lag,
-    normalized: normalized,
-  );
-}
+    return _LagResult(
+      lagSamples: lag,
+      normalized: normalized,
+    );
+  }
 
   List<List<double>> _haarDetailBands(List<double> samples, int maxLevels) {
     final bands = <List<double>>[];
@@ -446,14 +443,12 @@ _LagResult? _fallbackLag(
     final normalized = SignalUtils.normalize(_removeDc(upsampled));
     if (normalized.every((value) => value == 0)) return null;
 
-    final minLag =
-        (sampleRate * 60 / context.maxBpm)
-            .floor()
-            .clamp(1, normalized.length - 1);
-    final maxLag =
-        (sampleRate * 60 / context.minBpm)
-            .floor()
-            .clamp(minLag + 1, normalized.length - 1);
+    final minLag = (sampleRate * 60 / context.maxBpm)
+        .floor()
+        .clamp(1, normalized.length - 1);
+    final maxLag = (sampleRate * 60 / context.minBpm)
+        .floor()
+        .clamp(minLag + 1, normalized.length - 1);
     if (minLag >= maxLag) return null;
 
     final lag = SignalUtils.dominantLag(

@@ -52,7 +52,8 @@ class TempogramComputer {
     }
 
     final windowSeconds = math.max(1.5, config.windowSeconds);
-    final hopSeconds = math.max(0.2, math.min(windowSeconds, config.hopSeconds));
+    final hopSeconds =
+        math.max(0.2, math.min(windowSeconds, config.hopSeconds));
 
     final windowLength = (windowSeconds * featureRate).round();
     final hopLength = math.max(1, (hopSeconds * featureRate).round());
@@ -64,7 +65,8 @@ class TempogramComputer {
     final maxTempo = maxBpm ?? config.maxBpm;
     final tempoBins = config.tempoBins;
     final tempoAxis = Float32List(tempoBins);
-    final tempoStep = (maxTempo - minTempo) / (tempoBins - 1).clamp(1, tempoBins);
+    final tempoStep =
+        (maxTempo - minTempo) / (tempoBins - 1).clamp(1, tempoBins);
     for (var i = 0; i < tempoBins; i++) {
       tempoAxis[i] = (minTempo + tempoStep * i).clamp(minTempo, maxTempo);
     }
@@ -80,7 +82,8 @@ class TempogramComputer {
       if (window.isEmpty) {
         continue;
       }
-      final paddedLength = SignalUtils.nextPowerOfTwo(math.max(window.length, 64));
+      final paddedLength =
+          SignalUtils.nextPowerOfTwo(math.max(window.length, 64));
       final padded = List<double>.filled(paddedLength, 0);
       for (var i = 0; i < window.length; i++) {
         padded[i] = window[i];

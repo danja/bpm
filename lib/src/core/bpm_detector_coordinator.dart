@@ -72,7 +72,8 @@ class BpmDetectorCoordinator {
     _latestTempoAxis = null;
     _latestTempogramTimes = null;
     _latestTempogramMatrix = const [];
-    _logger.info('Consensus engine and coordinator state reset', source: 'Coordinator');
+    _logger.info('Consensus engine and coordinator state reset',
+        source: 'Coordinator');
 
     yield BpmSummary(
       status: DetectionStatus.listening,
@@ -230,8 +231,8 @@ class BpmDetectorCoordinator {
         // Run algorithms in background with timeout to avoid hanging
         _logger.info('Starting background analysis...', source: 'Coordinator');
 
-        final waveletEnabled =
-            registry.algorithms.any((algorithm) => algorithm.id == 'wavelet_energy');
+        final waveletEnabled = registry.algorithms
+            .any((algorithm) => algorithm.id == 'wavelet_energy');
         final algorithmIds = waveletEnabled
             ? registry.algorithms
                 .where((algorithm) => algorithm.id != 'wavelet_energy')
@@ -273,10 +274,12 @@ class BpmDetectorCoordinator {
         final plpBpm = isolateResult['plpBpm'] as double?;
         final plpStrength = isolateResult['plpStrength'] as double?;
         final plpTrace = isolateResult['plpTrace'] as Float32List?;
-        final plpStrengthTrace = isolateResult['plpStrengthTrace'] as Float32List?;
+        final plpStrengthTrace =
+            isolateResult['plpStrengthTrace'] as Float32List?;
         final tempoAxis = isolateResult['tempoAxis'] as Float32List?;
         final tempogramTimes = isolateResult['tempogramTimes'] as Float32List?;
-        final tempogramMatrix = isolateResult['tempogramMatrix'] as List<Float32List>?;
+        final tempogramMatrix =
+            isolateResult['tempogramMatrix'] as List<Float32List>?;
 
         if (tempoAxis != null && tempoAxis.isNotEmpty) {
           _latestTempoAxis = tempoAxis;
@@ -455,7 +458,8 @@ class BpmDetectorCoordinator {
         }
 
         final merged = [
-          ...baseReadings.where((reading) => reading.algorithmId != 'wavelet_energy'),
+          ...baseReadings
+              .where((reading) => reading.algorithmId != 'wavelet_energy'),
           ...readings,
         ];
 
@@ -509,7 +513,8 @@ class BpmDetectorCoordinator {
           );
         }
       } catch (error) {
-        _logger.warning('Wavelet analysis failed: $error', source: 'Coordinator');
+        _logger.warning('Wavelet analysis failed: $error',
+            source: 'Coordinator');
       } finally {
         _waveletRunning = false;
       }
@@ -558,7 +563,8 @@ class BpmDetectorCoordinator {
   }
 
   final minSamples = sampleRate * 3;
-  final maxSamples = math.max(sampleRate * targetDuration.inSeconds, minSamples);
+  final maxSamples =
+      math.max(sampleRate * targetDuration.inSeconds, minSamples);
   final collected = <double>[];
   var gathered = 0;
 
@@ -594,7 +600,8 @@ class BpmDetectorCoordinator {
   return (frames: [frame], sampleRate: effectiveSampleRate);
 }
 
-DetectionContext _adjustDetectionContext(DetectionContext base, int sampleRate) {
+DetectionContext _adjustDetectionContext(
+    DetectionContext base, int sampleRate) {
   if (sampleRate == base.sampleRate) {
     return base;
   }

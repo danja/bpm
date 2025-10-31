@@ -17,7 +17,8 @@ class RobustConsensusEngine implements ConsensusInterface {
   RobustConsensusEngine({
     this.historySize = 10,
     this.minReadingsForOutlierDetection = 3,
-    this.algorithmOutlierThreshold = 8.0, // BPM deviation for per-algorithm outlier
+    this.algorithmOutlierThreshold =
+        8.0, // BPM deviation for per-algorithm outlier
     this.clusterTolerance = 3.0, // BPM tolerance for clustering
     this.minClusterSize = 2, // Minimum algorithms to form valid cluster
     this.smoothingFactor = 0.25,
@@ -103,14 +104,10 @@ class RobustConsensusEngine implements ConsensusInterface {
     }
 
     // Step 7: Calculate confidence
-    final participatingAlgorithms = cleanedReadings
-        .map((reading) => reading.algorithmId)
-        .toSet()
-        .length;
-    final totalAlgorithms = readings
-        .map((reading) => reading.algorithmId)
-        .toSet()
-        .length;
+    final participatingAlgorithms =
+        cleanedReadings.map((reading) => reading.algorithmId).toSet().length;
+    final totalAlgorithms =
+        readings.map((reading) => reading.algorithmId).toSet().length;
 
     final confidence = _calculateConfidence(
       winningCluster: winningCluster,
@@ -176,8 +173,7 @@ class RobustConsensusEngine implements ConsensusInterface {
       );
 
       final metadata = Map<String, Object?>.from(reading.metadata);
-      final factor =
-          reading.bpm == 0 ? 1.0 : (adjustedBpm / reading.bpm).abs();
+      final factor = reading.bpm == 0 ? 1.0 : (adjustedBpm / reading.bpm).abs();
       if ((factor - 1.0).abs() > 0.05) {
         metadata['octaveNormalized'] = true;
         metadata['octaveFactor'] = adjustedBpm / reading.bpm;
@@ -281,7 +277,8 @@ class RobustConsensusEngine implements ConsensusInterface {
     if (_currentConsensus != null && clusters.length > 1) {
       final topWeight = _clusterWeight(clusters.first);
       final tiedClusters = clusters
-          .where((cluster) => (_clusterWeight(cluster) - topWeight).abs() < 1e-6)
+          .where(
+              (cluster) => (_clusterWeight(cluster) - topWeight).abs() < 1e-6)
           .toList();
 
       if (tiedClusters.length > 1) {
@@ -389,9 +386,8 @@ class RobustConsensusEngine implements ConsensusInterface {
 
     final clusterStd = weightSum <= 0 ? 0 : math.sqrt(variance / weightSum);
     final clusterStdScore = (1.0 / (1.0 + clusterStd / 3.0)).clamp(0.0, 1.0);
-    final avgConsistency = weightSum <= 0
-        ? 1.0
-        : (consistencySum / weightSum).clamp(0.0, 1.0);
+    final avgConsistency =
+        weightSum <= 0 ? 1.0 : (consistencySum / weightSum).clamp(0.0, 1.0);
     final avgMultiplierDeviation = weightSum <= 0
         ? 0.0
         : (multiplierDeviationSum / weightSum).clamp(0.0, 2.0);
@@ -402,13 +398,11 @@ class RobustConsensusEngine implements ConsensusInterface {
     final drift = (rawConsensus - smoothedConsensus).abs();
     final driftScore = (1.0 - drift / 6.0).clamp(0.0, 1.0);
 
-    final clusterAlgorithmIds = winningCluster.members
-        .map((reading) => reading.algorithmId)
-        .toSet();
+    final clusterAlgorithmIds =
+        winningCluster.members.map((reading) => reading.algorithmId).toSet();
     final coverageScore = totalAlgorithms <= 0
         ? 1.0
-        : (clusterAlgorithmIds.length / totalAlgorithms)
-            .clamp(0.0, 1.0);
+        : (clusterAlgorithmIds.length / totalAlgorithms).clamp(0.0, 1.0);
 
     var correctionCount = 0;
     var suppressedSupport = 0;
@@ -457,8 +451,8 @@ class RobustConsensusEngine implements ConsensusInterface {
 
     if (participatingAlgorithms > 0 &&
         clusterAlgorithmIds.length < participatingAlgorithms) {
-      final penalty =
-          (clusterAlgorithmIds.length / participatingAlgorithms).clamp(0.0, 1.0);
+      final penalty = (clusterAlgorithmIds.length / participatingAlgorithms)
+          .clamp(0.0, 1.0);
       confidence *= (0.8 + 0.2 * penalty);
     }
 
@@ -498,15 +492,21 @@ class RobustConsensusEngine implements ConsensusInterface {
         (reading.metadata['rangeMultiplier'] as num?)?.toDouble() ?? 1.0;
     final clamped = reading.metadata['rangeClamped'] == true;
     final multiplierWeight = _multiplierWeight(multiplier, clamped);
-    final octavePenalty = reading.metadata['octaveNormalized'] == true ? 0.85 : 1.0;
-    final weight = base * (0.6 + 0.4 * consistency.clamp(0.0, 1.0)) * multiplierWeight * octavePenalty;
+    final octavePenalty =
+        reading.metadata['octaveNormalized'] == true ? 0.85 : 1.0;
+    final weight = base *
+        (0.6 + 0.4 * consistency.clamp(0.0, 1.0)) *
+        multiplierWeight *
+        octavePenalty;
     var adjusted = weight;
     final source = reading.metadata['source'];
     if (reading.algorithmId == 'plp_tempogram' || source == 'tempogram') {
       adjusted *= 0.75;
     }
     if (reading.metadata['strength'] is num) {
-      adjusted *= (0.7 + 0.3 * (reading.metadata['strength'] as num).toDouble().clamp(0.0, 1.0));
+      adjusted *= (0.7 +
+          0.3 *
+              (reading.metadata['strength'] as num).toDouble().clamp(0.0, 1.0));
     }
     if (adjusted.isNaN || adjusted.isInfinite) {
       return 0.1;

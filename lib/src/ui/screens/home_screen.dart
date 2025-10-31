@@ -159,7 +159,8 @@ class _ElapsedClock extends StatelessWidget {
     return BlocSelector<BpmCubit, BpmState, _ClockViewModel>(
       selector: (state) => _ClockViewModel(
         elapsed: state.elapsed,
-        isRunning: state.startedAt != null && state.status != DetectionStatus.idle,
+        isRunning:
+            state.startedAt != null && state.status != DetectionStatus.idle,
       ),
       builder: (context, viewModel) {
         final minutes = viewModel.elapsed.inMinutes;

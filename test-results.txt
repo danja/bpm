@@ -1,111 +1,1 @@
-00:00 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:01 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:02 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:02 +0: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset steady beat 120                                                                                                   00:02 +0 -1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset steady beat 120 [E]                                                                                            
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/algorithms/simple_onset_test.dart 98:31            main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/simple_onset_test.dart -p vm --plain-name 'SimpleOnset steady beat 120'
-00:02 +0 -1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset noisy beat 105                                                                                                 00:03 +0 -1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset noisy beat 105                                                                                                 00:03 +0 -2: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset noisy beat 105 [E]                                                                                             
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/algorithms/simple_onset_test.dart 98:31            main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/simple_onset_test.dart -p vm --plain-name 'SimpleOnset noisy beat 105'
-00:03 +0 -3: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset click track 180                                                                                                00:03 +0 -3: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: FFT spectrum algorithm approximates planted tempo [E]                                                         
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                            Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                    NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                                  new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                    NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                     NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38     PreprocessingPipeline.process
-  test/algorithms/fft_and_wavelet_algorithm_test.dart 24:21  main.preprocessSignal
-  test/algorithms/fft_and_wavelet_algorithm_test.dart 38:26  main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart -p vm --plain-name 'FFT spectrum algorithm approximates planted tempo'
-00:04 +0 -4: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset click track 180 [E]                                                                                            
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/algorithms/simple_onset_test.dart 98:31            main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/simple_onset_test.dart -p vm --plain-name 'SimpleOnset click track 180'
-00:04 +0 -4: /home/danny/github/bpm/test/widget_test.dart: renders placeholder layout                                                                                                                  00:04 +0 -5: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: Wavelet energy algorithm surfaces tempo band within tolerance [E]                                             
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                            Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                    NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                                  new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                    NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                     NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38     PreprocessingPipeline.process
-  test/algorithms/fft_and_wavelet_algorithm_test.dart 24:21  main.preprocessSignal
-  test/algorithms/fft_and_wavelet_algorithm_test.dart 59:26  main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart -p vm --plain-name 'Wavelet energy algorithm surfaces tempo band within tolerance'
-00:04 +0 -6: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset complex rhythm 92 [E]                                                                                          
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/algorithms/simple_onset_test.dart 98:31            main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/simple_onset_test.dart -p vm --plain-name 'SimpleOnset complex rhythm 92'
-00:04 +1 -6: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: (setUpAll)                                                                                                               00:04 +1 -7: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset synthetic music 135 [E]                                                                                        
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/algorithms/simple_onset_test.dart 98:31            main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/algorithms/simple_onset_test.dart -p vm --plain-name 'SimpleOnset synthetic music 135'
-00:05 +1 -8: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: (setUpAll) [E]                                                                                                           
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/integration/metronome_wav_test.dart 36:44          main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/integration/metronome_wav_test.dart -p vm --plain-name '(setUpAll)'
-00:05 +1 -8: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: (tearDownAll)                                                                                                            00:05 +1 -8: loading /home/danny/github/bpm/test/dsp/preprocessing_test.dart                                                                                                                           00:05 +1 -8: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                      00:06 +1 -8: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                      00:06 +1 -9: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output [E]                                                                                  
-  RangeError (length): Invalid value: Not in inclusive range 0..511: 512
-  dart:typed_data                                         Float32List.[]
-  package:bpm/src/dsp/novelty.dart 154:26                 NoveltyComputer._applyMelFilterbank.<fn>
-  dart:core                                               new _List.generate
-  package:bpm/src/dsp/novelty.dart 147:12                 NoveltyComputer._applyMelFilterbank
-  package:bpm/src/dsp/novelty.dart 68:19                  NoveltyComputer.compute
-  package:bpm/src/dsp/preprocessing_pipeline.dart 163:38  PreprocessingPipeline.process
-  test/dsp/preprocessing_test.dart 29:29                  main.<fn>
-  
-
-To run this test again: /home/danny/flutter/bin/cache/dart-sdk/bin/dart test /home/danny/github/bpm/test/dsp/preprocessing_test.dart -p vm --plain-name 'Preprocessing pipeline creates valid output'
-00:06 +1 -9: Some tests failed.                                                                                                                                                                        
+00:00 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:01 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:02 +0: loading /home/danny/github/bpm/test/algorithms/simple_onset_test.dart                                                                                                                        00:02 +0: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset steady beat 120                                                                                                   00:02 +1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset steady beat 120                                                                                                   00:02 +1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset noisy beat 105                                                                                                    00:03 +1: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset noisy beat 105                                                                                                    00:03 +2: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: FFT spectrum algorithm approximates planted tempo                                                                00:03 +3: /home/danny/github/bpm/test/algorithms/simple_onset_test.dart: SimpleOnset click track 180                                                                                                   00:03 +4: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: Wavelet energy algorithm surfaces tempo band within tolerance                                                    00:04 +4: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: Wavelet energy algorithm surfaces tempo band within tolerance                                                    00:04 +5: /home/danny/github/bpm/test/algorithms/fft_and_wavelet_algorithm_test.dart: Wavelet energy algorithm surfaces tempo band within tolerance                                                    00:04 +6: /home/danny/github/bpm/test/widget_test.dart: renders placeholder layout                                                                                                                     00:04 +7: /home/danny/github/bpm/test/widget_test.dart: renders placeholder layout                                                                                                                     00:05 +7: /home/danny/github/bpm/test/widget_test.dart: renders placeholder layout                                                                                                                     00:05 +8: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: (setUpAll)                                                                                                                  00:05 +8: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: SimpleOnset matches metronome wav                                                                                           00:05 +9: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: SimpleOnset matches metronome wav                                                                                           00:05 +9: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: Autocorrelation matches metronome wav                                                                                       00:05 +10: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: Autocorrelation matches metronome wav                                                                                      00:05 +10: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: FFT spectrum matches metronome wav                                                                                         00:05 +11: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: FFT spectrum matches metronome wav                                                                                         00:05 +11: /home/danny/github/bpm/test/integration/metronome_wav_test.dart: Wavelet energy matches metronome wav                                                                                       00:05 +12: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                        00:05 +13: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                        00:06 +13: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                        00:06 +14: /home/danny/github/bpm/test/dsp/preprocessing_test.dart: Preprocessing pipeline creates valid output                                                                                        00:06 +14: loading /home/danny/github/bpm/test/dsp/tempogram_test.dart                                                                                                                                 00:06 +14: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer produces tempogram for rhythmic audio                                                                                00:06 +15: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer produces tempogram for rhythmic audio                                                                                00:06 +16: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer produces tempogram for rhythmic audio                                                                                00:06 +17: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer produces tempogram for rhythmic audio                                                                                00:06 +17: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer handles empty novelty curve gracefully                                                                               00:06 +18: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer handles empty novelty curve gracefully                                                                               00:06 +18: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer window and hop respect feature rate bounds                                                                           00:06 +19: /home/danny/github/bpm/test/dsp/tempogram_test.dart: TempogramComputer window and hop respect feature rate bounds                                                                           00:07 +19: All tests passed!                                                                                                                                                                           

@@ -5,7 +5,8 @@ Real-time Flutter application that captures microphone audio, runs multiple BPM 
 ### Current Status
 
 - ✅ **Core DSP**: Four complementary detectors wired up (see [`docs/algorithms.md`](docs/algorithms.md) for full descriptions and references).
-- ✅ **Real-time UI**: Consensus card + delta indicator + sparkline history are live.
+- ✅ **Real-time UI**: Consensus card + delta indicator + sparkline history are live, now with an elapsed run timer and PLP panel derived from the tempogram.
+- ✅ **Tempogram/PLP integration**: Preprocessing publishes tempogram snapshots and PLP readings that feed both consensus weighting and the UI for transparency.
 - ✅ **Platform plumbing**: `record` 6.x handles microphone streaming across mobile & desktop targets.
 - 🚧 **Next Up**: Accuracy stabilization + regression harness work tracked in [`docs/PLAN-03.md`](docs/PLAN-03.md), tactical items in [`docs/next-steps.md`](docs/next-steps.md), and milestone updates in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
@@ -26,6 +27,7 @@ Key docs:
 - [`docs/PLAN-03.md`](docs/PLAN-03.md) – accuracy stabilization roadmap (interval histograms, consensus weighting, validation).
 - [`docs/architecture.md`](docs/architecture.md) – layered architecture context + current accuracy refinements.
 - [`docs/algorithms.md`](docs/algorithms.md) – signal-processing approaches & citations.
+- [`docs/TEMPOGRAM-UI-SCOPE.md`](docs/TEMPOGRAM-UI-SCOPE.md) – plan for replacing the oscilloscope with a tempogram/PLP visualiser.
 - [`docs/linux-wav-test-rig.md`](docs/linux-wav-test-rig.md) – WAV fixture harness + validation instructions.
 - [`docs/next-steps.md`](docs/next-steps.md) – near-term engineering focus.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) – milestone log (append every major update).

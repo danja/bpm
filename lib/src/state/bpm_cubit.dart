@@ -20,7 +20,8 @@ class BpmCubit extends Cubit<BpmState> {
   Future<void> start() async {
     _logger.info('User pressed Start button', source: 'App');
     if (_subscription != null) {
-      _logger.warning('Already subscribed, ignoring start request', source: 'App');
+      _logger.warning('Already subscribed, ignoring start request',
+          source: 'App');
       return;
     }
 
@@ -38,40 +39,40 @@ class BpmCubit extends Cubit<BpmState> {
     _startElapsedTicker();
 
     _subscription = _repository.listen().listen(
-          (summary) {
-            final blendedConsensus = summary.consensus != null
-                ? _smoothedConsensus(state.consensus, summary.consensus!)
-                : state.consensus;
-            emit(
-              state.copyWith(
-                status: summary.status,
-                readings: summary.readings,
-                consensus: blendedConsensus,
-                message: summary.message,
-                history: _updatedHistory(
-                  state.history,
-                  summary.status,
-                  summary.consensus != null ? blendedConsensus : null,
-                ),
-                previewSamples: summary.previewSamples,
-                plpBpm: summary.plpBpm,
-                plpStrength: summary.plpStrength,
-                plpTrace: summary.plpTrace,
-                tempogram: summary.tempogram,
-                clearTempogram: summary.tempogram == null,
-              ),
-            );
-          },
-          onError: (error, stackTrace) {
-            _logger.error('BPM detection error: $error', source: 'App');
-            emit(
-              state.copyWith(
-                status: DetectionStatus.error,
-                message: error.toString(),
-              ),
-            );
-          },
+      (summary) {
+        final blendedConsensus = summary.consensus != null
+            ? _smoothedConsensus(state.consensus, summary.consensus!)
+            : state.consensus;
+        emit(
+          state.copyWith(
+            status: summary.status,
+            readings: summary.readings,
+            consensus: blendedConsensus,
+            message: summary.message,
+            history: _updatedHistory(
+              state.history,
+              summary.status,
+              summary.consensus != null ? blendedConsensus : null,
+            ),
+            previewSamples: summary.previewSamples,
+            plpBpm: summary.plpBpm,
+            plpStrength: summary.plpStrength,
+            plpTrace: summary.plpTrace,
+            tempogram: summary.tempogram,
+            clearTempogram: summary.tempogram == null,
+          ),
         );
+      },
+      onError: (error, stackTrace) {
+        _logger.error('BPM detection error: $error', source: 'App');
+        emit(
+          state.copyWith(
+            status: DetectionStatus.error,
+            message: error.toString(),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> stop() async {
@@ -99,7 +100,8 @@ class BpmCubit extends Cubit<BpmState> {
     }
 
     final smoothedBpm = _smoothedBpm(current, consensus.bpm);
-    final smoothedConfidence = _smoothedConfidence(current, consensus.confidence);
+    final smoothedConfidence =
+        _smoothedConfidence(current, consensus.confidence);
 
     final next = List<BpmHistoryPoint>.from(current)
       ..add(
@@ -124,8 +126,8 @@ class BpmCubit extends Cubit<BpmState> {
     }
     final alpha = _consensusBlendAlpha;
     final bpm = previous.bpm + alpha * (incoming.bpm - previous.bpm);
-    final confidence =
-        previous.confidence + alpha * (incoming.confidence - previous.confidence);
+    final confidence = previous.confidence +
+        alpha * (incoming.confidence - previous.confidence);
     final clampedConfidence = confidence.clamp(0.0, 1.0).toDouble();
     return ConsensusResult(
       bpm: bpm,
@@ -136,7 +138,8 @@ class BpmCubit extends Cubit<BpmState> {
 
   double _smoothedBpm(List<BpmHistoryPoint> history, double candidate) {
     final recentCount = _historySmoothingWindow - 1;
-    final startIndex = history.length > recentCount ? history.length - recentCount : 0;
+    final startIndex =
+        history.length > recentCount ? history.length - recentCount : 0;
     final values = history.isEmpty
         ? <double>[]
         : history.sublist(startIndex).map((point) => point.bpm).toList();
@@ -147,7 +150,8 @@ class BpmCubit extends Cubit<BpmState> {
 
   double _smoothedConfidence(List<BpmHistoryPoint> history, double candidate) {
     final recentCount = _historySmoothingWindow - 1;
-    final startIndex = history.length > recentCount ? history.length - recentCount : 0;
+    final startIndex =
+        history.length > recentCount ? history.length - recentCount : 0;
     final values = history.isEmpty
         ? <double>[]
         : history.sublist(startIndex).map((point) => point.confidence).toList();

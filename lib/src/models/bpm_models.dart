@@ -93,7 +93,8 @@ class TempogramSnapshot extends Equatable {
   bool get isEmpty => matrix.isEmpty || tempoAxis.isEmpty || times.isEmpty;
 
   @override
-  List<Object?> get props => [matrix, tempoAxis, times, dominantTempo, dominantStrength];
+  List<Object?> get props =>
+      [matrix, tempoAxis, times, dominantTempo, dominantStrength];
 }
 
 /// Snapshot of the detection pipeline for presentation/state management.

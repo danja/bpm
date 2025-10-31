@@ -85,50 +85,47 @@ class BpmSummaryCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return algorithms
-        .map(
-          (entry) {
-            final reading = readingById[entry.$1];
-            final bpmText = reading != null
-                ? '${reading.bpm.toStringAsFixed(1)} BPM'
-                : '— BPM';
-            final confidence = reading?.confidence ?? 0;
+    return algorithms.map(
+      (entry) {
+        final reading = readingById[entry.$1];
+        final bpmText =
+            reading != null ? '${reading.bpm.toStringAsFixed(1)} BPM' : '— BPM';
+        final confidence = reading?.confidence ?? 0;
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          entry.$2,
-                          style: textTheme.titleSmall,
-                        ),
-                      ),
-                      Text(
-                        bpmText,
-                        style: textTheme.titleMedium,
-                      ),
-                    ],
+                  Expanded(
+                    child: Text(
+                      entry.$2,
+                      style: textTheme.titleSmall,
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(
-                    value: confidence.clamp(0.0, 1.0),
-                    minHeight: 4,
+                  Text(
+                    bpmText,
+                    style: textTheme.titleMedium,
                   ),
                 ],
               ),
-            );
-          },
-        )
-        .toList();
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: confidence.clamp(0.0, 1.0),
+                minHeight: 4,
+              ),
+            ],
+          ),
+        );
+      },
+    ).toList();
   }
 }
 
@@ -153,8 +150,16 @@ class _PlpPanel extends StatelessWidget {
     double? maxValue;
     for (var i = startIndex; i < sampleCount; i++) {
       final value = trace[i];
-      minValue = minValue == null ? value : value < minValue ? value : minValue;
-      maxValue = maxValue == null ? value : value > maxValue ? value : maxValue;
+      minValue = minValue == null
+          ? value
+          : value < minValue
+              ? value
+              : minValue;
+      maxValue = maxValue == null
+          ? value
+          : value > maxValue
+              ? value
+              : maxValue;
     }
     final strengthPercent = strength == null
         ? null
@@ -165,7 +170,8 @@ class _PlpPanel extends StatelessWidget {
       rangeText =
           'Range ≈ ${minValue.toStringAsFixed(0)} – ${maxValue.toStringAsFixed(0)} BPM';
     } else {
-      rangeText = 'Stable at ${recent?.toStringAsFixed(1) ?? bpm.toStringAsFixed(1)} BPM';
+      rangeText =
+          'Stable at ${recent?.toStringAsFixed(1) ?? bpm.toStringAsFixed(1)} BPM';
     }
 
     return Container(
