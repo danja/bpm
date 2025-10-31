@@ -10,6 +10,8 @@ class BpmState extends Equatable {
     this.message,
     this.history = const <BpmHistoryPoint>[],
     this.previewSamples = const [],
+    this.startedAt,
+    this.elapsed = Duration.zero,
   });
 
   final DetectionStatus status;
@@ -18,12 +20,16 @@ class BpmState extends Equatable {
   final String? message;
   final List<BpmHistoryPoint> history;
   final List<double> previewSamples;
+  final DateTime? startedAt;
+  final Duration elapsed;
 
   factory BpmState.initial() => const BpmState(
         status: DetectionStatus.idle,
         readings: [],
         history: [],
         previewSamples: [],
+        startedAt: null,
+        elapsed: Duration.zero,
       );
 
   BpmState copyWith({
@@ -34,6 +40,9 @@ class BpmState extends Equatable {
     String? message,
     List<BpmHistoryPoint>? history,
     List<double>? previewSamples,
+    DateTime? startedAt,
+    bool resetStartTime = false,
+    Duration? elapsed,
   }) {
     return BpmState(
       status: status ?? this.status,
@@ -42,10 +51,14 @@ class BpmState extends Equatable {
       message: message ?? this.message,
       history: history ?? this.history,
       previewSamples: previewSamples ?? this.previewSamples,
+      startedAt: resetStartTime ? null : (startedAt ?? this.startedAt),
+      elapsed: resetStartTime
+          ? Duration.zero
+          : (elapsed ?? this.elapsed),
     );
   }
 
   @override
   List<Object?> get props =>
-      [status, readings, consensus, message, history, previewSamples];
+      [status, readings, consensus, message, history, previewSamples, startedAt, elapsed];
 }

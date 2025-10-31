@@ -1,3 +1,5 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/state/bpm_state.dart';
@@ -7,6 +9,7 @@ import 'package:bpm/src/ui/widgets/bpm_trend_sparkline.dart';
 import 'package:bpm/src/ui/widgets/app_console.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -17,7 +20,8 @@ class HomeScreen extends StatelessWidget {
       builder: (context, state) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Real-time BPM Detector'),
+            centerTitle: false,
+            title: const _TitleBar(),
           ),
           body: Stack(
             children: [
@@ -59,6 +63,27 @@ class HomeScreen extends StatelessWidget {
           floatingActionButton: _DetectionFab(state: state),
         );
       },
+    );
+  }
+}
+
+class _TitleBar extends StatelessWidget {
+  const _TitleBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: const [
+        Expanded(
+          child: Text(
+            'Real-time BPM Detector',
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        SizedBox(width: 12),
+        _ElapsedClock(),
+      ],
     );
   }
 }
@@ -124,4 +149,61 @@ class _StatusBanner extends StatelessWidget {
       child: Text(text),
     );
   }
+}
+
+class _ElapsedClock extends StatelessWidget {
+  const _ElapsedClock();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocSelector<BpmCubit, BpmState, _ClockViewModel>(
+      selector: (state) => _ClockViewModel(
+        elapsed: state.elapsed,
+        isRunning: state.startedAt != null && state.status != DetectionStatus.idle,
+      ),
+      builder: (context, viewModel) {
+        final minutes = viewModel.elapsed.inMinutes;
+        final seconds = viewModel.elapsed.inSeconds.remainder(60);
+        final safeMinutes = minutes.clamp(0, 999);
+        final minuteText = safeMinutes is int
+            ? safeMinutes.toString().padLeft(2, '0')
+            : safeMinutes.round().toString().padLeft(2, '0');
+        final text = '$minuteText:${seconds.toString().padLeft(2, '0')}';
+        final theme = Theme.of(context);
+        final baseStyle = theme.textTheme.titleMedium ??
+            theme.textTheme.titleLarge ??
+            const TextStyle(fontSize: 18);
+        final color = viewModel.isRunning
+            ? baseStyle.color
+            : (theme.appBarTheme.foregroundColor ??
+                theme.colorScheme.onPrimary.withOpacity(0.7));
+
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: child,
+          ),
+          child: Text(
+            text,
+            key: ValueKey<String>(text),
+            style: baseStyle.copyWith(
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ClockViewModel extends Equatable {
+  const _ClockViewModel({required this.elapsed, required this.isRunning});
+
+  final Duration elapsed;
+  final bool isRunning;
+
+  @override
+  List<Object?> get props => [elapsed.inSeconds, isRunning];
 }

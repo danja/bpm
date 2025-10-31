@@ -112,7 +112,12 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         : totalMagnitude / (maxIndex - minIndex + 1);
 
     final neighbors = <TempoCandidate>[
-      TempoCandidate(bpm: bestBpm, weight: 1.0, source: 'peak'),
+      TempoCandidate(
+        bpm: bestBpm,
+        weight: 1.0,
+        source: 'peak',
+        allowHarmonics: false,
+      ),
       TempoCandidate(bpm: bestBpm / 2, weight: 0.55, source: 'half'),
       TempoCandidate(bpm: bestBpm * 2, weight: 0.5, source: 'double'),
       TempoCandidate(bpm: bestBpm * 1.5, weight: 0.35, source: 'three-halves'),
@@ -139,6 +144,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
             bpm: bpmCandidate,
             weight: weight,
             source: 'neighbor_$offset',
+            allowHarmonics: false,
           ),
         );
       }
@@ -151,6 +157,11 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     );
 
     BpmRangeResult? fallbackAdjustment;
+    final peakAdjustment = AlgorithmUtils.coerceToRange(
+      bestBpm,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
     if (refinement == null) {
       fallbackAdjustment = AlgorithmUtils.coerceToRange(
         bestBpm,
@@ -161,15 +172,28 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         return null;
       }
     }
+    double bpm;
+    bool fundamentalGuardApplied = false;
+    if (refinement != null) {
+      bpm = refinement.bpm;
+      final avgMultiplier = refinement.averageMultiplier.abs();
+      if ((avgMultiplier - 1.0).abs() > 0.25 && peakAdjustment != null) {
+        bpm = peakAdjustment.bpm;
+        fundamentalGuardApplied = true;
+      }
+    } else {
+      bpm = fallbackAdjustment!.bpm;
+    }
 
-    final bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
-
-    final penalty = refinement != null
+    var penalty = refinement != null
         ? refinement.consistency
         : (fallbackAdjustment!.clamped
             ? 0.6
             : (1.0 - (fallbackAdjustment.multiplier - 1.0).abs() * 0.2)
                 .clamp(0.6, 1.0));
+    if (fundamentalGuardApplied) {
+      penalty = max(0.6, penalty * 0.9);
+    }
 
     final confidence =
         ((bestMagnitude / averageMagnitude) * penalty).clamp(0.0, 1.0);
@@ -200,6 +224,12 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     }
 
     metadata['clusterConsistency'] ??= penalty;
+    metadata['fundamentalGuardApplied'] = fundamentalGuardApplied;
+    if (fundamentalGuardApplied && peakAdjustment != null) {
+      metadata['rangeMultiplier'] = peakAdjustment.multiplier;
+      metadata['rangeClamped'] = peakAdjustment.clamped;
+      metadata['fundamentalRangeMultiplier'] = peakAdjustment.multiplier;
+    }
 
     return BpmReading(
       algorithmId: id,

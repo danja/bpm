@@ -12,6 +12,7 @@ class BpmCubit extends Cubit<BpmState> {
   final BpmRepository _repository;
   final _logger = AppLogger();
   StreamSubscription<BpmSummary>? _subscription;
+  Timer? _elapsedTimer;
   static const _maxHistoryPoints = 12;
   static const _consensusBlendAlpha = 0.35;
   static const _historySmoothingWindow = 3;
@@ -23,13 +24,17 @@ class BpmCubit extends Cubit<BpmState> {
       return;
     }
 
+    final startedAt = DateTime.now().toUtc();
     emit(
       BpmState.initial().copyWith(
         status: DetectionStatus.listening,
         readings: const [],
         clearConsensus: true,
+        startedAt: startedAt,
+        elapsed: Duration.zero,
       ),
     );
+    _startElapsedTicker();
 
     _subscription = _repository.listen().listen(
           (summary) {
@@ -68,6 +73,7 @@ class BpmCubit extends Cubit<BpmState> {
     await _subscription?.cancel();
     _subscription = null;
     await _repository.stop();
+    _stopElapsedTicker();
     emit(BpmState.initial());
   }
 
@@ -142,5 +148,31 @@ class BpmCubit extends Cubit<BpmState> {
     values.add(candidate);
     final total = values.fold<double>(0, (sum, value) => sum + value);
     return (total / values.length).clamp(0.0, 1.0).toDouble();
+  }
+
+  void _startElapsedTicker() {
+    _elapsedTimer?.cancel();
+    final startedAt = state.startedAt;
+    if (startedAt == null) {
+      return;
+    }
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (isClosed) {
+        _stopElapsedTicker();
+        return;
+      }
+      final start = state.startedAt;
+      if (start == null) {
+        _stopElapsedTicker();
+        return;
+      }
+      final elapsed = DateTime.now().toUtc().difference(start);
+      emit(state.copyWith(elapsed: elapsed));
+    });
+  }
+
+  void _stopElapsedTicker() {
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
   }
 }

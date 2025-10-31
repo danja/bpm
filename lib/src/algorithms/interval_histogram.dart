@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:bpm/src/algorithms/detection_context.dart';
 
 import 'algorithm_utils.dart';
@@ -50,7 +48,7 @@ class IntervalHistogram {
     }
     for (final bucket in _buckets.values) {
       final lengthRatio = (bucket.interval / _longestInterval).clamp(0.3, 1.0);
-      bucket.applyBoost(lengthRatio * lengthRatio);
+      bucket.applyBoost(lengthRatio * lengthRatio * lengthRatio);
     }
   }
 
@@ -65,20 +63,43 @@ class IntervalHistogram {
     }
 
     for (final bucket in _buckets.values) {
-      if (!bucket.containsSource('half_interval') &&
-          !bucket.containsSource('half_lag')) {
-        continue;
+      var shouldSuppress = false;
+
+      if (bucket.containsSource('half_interval') ||
+          bucket.containsSource('half_lag')) {
+        final fundamental = _findNearest(bucket.interval * 2);
+        if (fundamental != null &&
+            (fundamental.containsSource('interval') ||
+                fundamental.containsSource('lag'))) {
+          final share = fundamental.score / totalScore;
+          if (share >= minShare) {
+            shouldSuppress = true;
+          }
+        }
       }
-      final fundamental = _findNearest(bucket.interval * 2);
-      if (fundamental == null) {
-        continue;
+
+      if (!shouldSuppress) {
+        for (final candidate in _buckets.values) {
+          if (candidate.interval <= bucket.interval) {
+            continue;
+          }
+          final ratio = candidate.interval / bucket.interval;
+          final nearThreeHalves = ratio >= 1.45 && ratio <= 1.7;
+          final nearDouble = ratio >= 1.95 && ratio <= 2.2;
+          final nearTriple = ratio >= 2.9 && ratio <= 3.3;
+          if (!nearThreeHalves && !nearDouble && !nearTriple) {
+            continue;
+          }
+          final share = candidate.score / totalScore;
+          final threshold = nearThreeHalves ? minShare * 0.8 : minShare;
+          if (share >= threshold) {
+            shouldSuppress = true;
+            break;
+          }
+        }
       }
-      if (!fundamental.containsSource('interval') &&
-          !fundamental.containsSource('lag')) {
-        continue;
-      }
-      final share = fundamental.score / totalScore;
-      if (share >= minShare) {
+
+      if (shouldSuppress) {
         bucket.suppress(suppressionFactor);
       }
     }
@@ -90,13 +111,28 @@ class IntervalHistogram {
       return null;
     }
 
-    final primary = sorted.first;
+    var primary = sorted.first;
+    if (primary.suppressed) {
+      final alternative = sorted.firstWhere(
+        (bucket) => !bucket.suppressed,
+        orElse: () => primary,
+      );
+      primary = alternative;
+    }
     var selected = primary;
 
-    if (preferLonger) {
-      for (final bucket in sorted) {
+    final primaryBpm = 60.0 / primary.interval;
+    if (preferLonger && sorted.length > 1) {
+      for (final bucket in sorted.skip(1)) {
+        if (bucket.suppressed) {
+          continue;
+        }
+        final intervalRatio = bucket.interval / primary.interval;
+        if (intervalRatio >= 1.45 && bucket.score >= primary.score * 0.55) {
+          selected = bucket;
+          break;
+        }
         final bpm = 60.0 / bucket.interval;
-        final primaryBpm = 60.0 / primary.interval;
         if (bpm <= primaryBpm / 1.6 && bucket.score >= primary.score * 0.6) {
           selected = bucket;
           break;

@@ -46,6 +46,12 @@ void main() {
     String? label,
   }) async {
     final reading = await readingFuture;
+    printOnFailure(
+      '$label reading:\n'
+      '  BPM: ${reading?.bpm}\n'
+      '  Confidence: ${reading?.confidence}\n'
+      '  Metadata: ${reading?.metadata}',
+    );
     expect(reading, isNotNull, reason: '$label produced null reading');
     expect(
       (reading!.bpm - expectedBpm).abs(),

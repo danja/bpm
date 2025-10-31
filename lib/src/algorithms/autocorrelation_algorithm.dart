@@ -13,7 +13,7 @@ import 'package:bpm/src/models/bpm_models.dart';
 /// improving performance by eliminating redundant downsampling.
 class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   AutocorrelationAlgorithm({
-    this.maxAnalysisSeconds = 4,
+    this.maxAnalysisSeconds = 10,
   });
 
   final int maxAnalysisSeconds;
@@ -31,9 +31,10 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
   Future<BpmReading?> analyze({
     required PreprocessedSignal signal,
   }) async {
-    // Use pre-downsampled 8kHz signal from preprocessing
-    var samples = List<double>.from(signal.samples8kHz);
-    const effectiveSampleRate = 8000; // Target sample rate from preprocessing
+    // Use onset envelope (10ms hop) for periodicity to emphasise rhythmic energy
+    var samples = signal.onsetEnvelope.map((value) => value.toDouble()).toList();
+    final effectiveSampleRate =
+        (1.0 / signal.onsetTimeScale).round(); // ~100 Hz feature rate
 
     if (samples.isEmpty || samples.length < effectiveSampleRate) {
       return null;
@@ -64,17 +65,19 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final coarseStride = math.max(1, (maxLag - minLag) ~/ 100);
+    final coarseStride = math.max(1, (maxLag - minLag) ~/ 200);
     var bestScore = double.negativeInfinity;
     var bestLag = minLag;
     var evaluations = 0;
-    const maxEvaluations = 400;
+    const maxEvaluations = 800;
     final lagScores = <int, double>{};
 
     for (var lag = minLag; lag <= maxLag; lag += coarseStride) {
-      final score = SignalUtils.autocorrelation(samples, lag);
+      final rawScore = SignalUtils.autocorrelation(samples, lag);
+      final score = rawScore.abs();
       evaluations++;
-      lagScores[lag] = math.max(lagScores[lag] ?? double.negativeInfinity, score);
+      lagScores[lag] =
+          math.max(lagScores[lag] ?? double.negativeInfinity, score);
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
@@ -87,9 +90,11 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     final refineStart = math.max(minLag, bestLag - coarseStride * 2);
     final refineEnd = math.min(maxLag, bestLag + coarseStride * 2);
     for (var lag = refineStart; lag <= refineEnd; lag++) {
-      final score = SignalUtils.autocorrelation(samples, lag);
+      final rawScore = SignalUtils.autocorrelation(samples, lag);
+      final score = rawScore.abs();
       evaluations++;
-      lagScores[lag] = math.max(lagScores[lag] ?? double.negativeInfinity, score);
+      lagScores[lag] =
+          math.max(lagScores[lag] ?? double.negativeInfinity, score);
       if (score > bestScore) {
         bestScore = score;
         bestLag = lag;
@@ -187,8 +192,27 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
                 fallbackAdjustment.clamped,
               );
 
-    final confidence =
-        (bestScore.clamp(0.0, 1.0) * penalty).clamp(0.0, 1.0);
+    final totalLagEnergy = lagScores.values.fold<double>(
+      0,
+      (sum, value) => sum + math.max(0.0, value),
+    );
+    final meanLagEnergy = lagScores.isEmpty
+        ? 0.0
+        : totalLagEnergy / lagScores.length;
+    final contrast = meanLagEnergy > 0
+        ? ((bestScore - meanLagEnergy) / (bestScore + 1e-6))
+            .clamp(0.0, 1.0)
+        : 1.0;
+    final clusterStrength = histogramSelection != null
+        ? (histogramSelection.score /
+                (histogramSelection.totalScore + 1e-6))
+            .clamp(0.0, 1.0)
+        : 0.5;
+
+    final confidence = (0.45 * penalty +
+            0.35 * clusterStrength +
+            0.2 * contrast)
+        .clamp(0.0, 1.0);
 
     final metadata = <String, Object?>{
       'lag': bestLag,
@@ -198,10 +222,6 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       'analysisSeconds': samples.length / effectiveSampleRate,
       'rawBpm': rawBpm,
       'clusterConsistency': penalty,
-      'lagScores': {
-        for (final entry in lagScores.entries)
-          entry.key.toString(): entry.value,
-      },
     };
 
     if (refinement != null) {
@@ -244,9 +264,17 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       metadata['histogramSuppressed'] = histogramSelection.suppressedBpms;
       metadata['candidateScores'] ??= histogramSelection.scoreMap;
       metadata['suppressedBuckets'] ??= histogramSelection.suppressedBpms;
+      metadata['histogramInterval'] = histogramSelection.normalizedInterval;
+      metadata['histogramScoreMap'] = histogramSelection.scoreMap;
     }
 
     metadata['clusterConsistency'] ??= penalty;
+    final topLagScores = lagScores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    metadata['lagPeaks'] = topLagScores
+        .take(6)
+        .map((entry) => {'lag': entry.key, 'score': entry.value})
+        .toList();
 
     return BpmReading(
       algorithmId: id,

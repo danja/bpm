@@ -30,11 +30,12 @@
 
 ### Phase A — Interval & Harmonic Refinement (Week 1)
 
-**Progress so far (2025-10-30)**
+**Progress so far (2025-10-30, evening sync)**
 
 - ✅ Added histogram-based fundamental selector for `SimpleOnsetAlgorithm` with duration-weighted bins and harmonic penalties.
 - ✅ Expanded per-reading metadata (bucket scores, multipliers, supporter counts) surfaced to consensus and integration tests.
-- ⏳ Remaining: propagate the same histogram weighting to Autocorrelation (initial lag histogram landed), retune penalties via WAV fixtures, and finalise adaptive threshold tuning.
+- ✅ Ported histogram weighting + harmonic suppression into Autocorrelation (now operating on onset envelopes) and FFT (with a fundamental guard), eliminating persistent half/double tempo readings on the 98 BPM WAV.
+- ✅ Downsampled the wavelet pipeline to 400 Hz, re-based timing on effective sample rate, and remapped confidence so the wavelet test completes in ~0.2 s with stable confidence.
 - 🔍 **New insight (Tempogram Toolbox)**: plan to integrate a bandwise spectral-flux novelty curve with logarithmic compression and adaptive differentiation (cf. `audio_to_noveltyCurve.m`) to strengthen onset detection on weak-transient material.
 
 1. **Interval histogramming**
@@ -126,3 +127,4 @@ Each milestone should conclude with a regression run on both synthetic and WAV f
 2. Create additional unit tests targeting histogram edge cases (e.g., alternating strong/weak beats).
 3. Draft WAV fixture list and secure licensing; script downloads into `assets/audio/fixtures`.
 4. Schedule check-in midway through Week 1 to review histogram outputs and adjust harmonic penalties based on early results.
+5. Scope UI replacement work: port `temp/MATLAB-Tempogram-Toolbox_1.0/visualize_tempogram.m` to supersede the existing oscilloscope display (see `docs/TEMPOGRAM-UI-SCOPE.md`), ensuring preprocessing-derived tempograms can be rendered in-app.

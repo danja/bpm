@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
 import 'package:bpm/src/algorithms/interval_histogram.dart';
@@ -36,14 +37,36 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     final smoothed = _smooth(envelope, max(3, envelope.length ~/ 60));
 
     // Detect peaks in the smoothed envelope
-    final peaks = _detectPeaks(smoothed);
+    final timeScale = signal.onsetTimeScale;
+    final minSeparationSeconds =
+        (60.0 / signal.context.maxBpm).clamp(0.15, 0.8) * 0.85;
+    final minSeparationSamples =
+        max(2, (minSeparationSeconds / timeScale).round());
+    final peaks = _detectPeaks(
+      smoothed,
+      minSeparation: minSeparationSamples,
+    );
+    if (peaks.length < 8 && minSeparationSamples > 2) {
+      final relaxedSeparation =
+          max(2, (minSeparationSamples * 0.6).round());
+      if (relaxedSeparation < minSeparationSamples) {
+        final relaxedPeaks = _detectPeaks(
+          smoothed,
+          minSeparation: relaxedSeparation,
+        );
+        if (relaxedPeaks.length >= 2) {
+          peaks
+            ..clear()
+            ..addAll(relaxedPeaks);
+        }
+      }
+    }
     if (peaks.length < 2) {
       return null;
     }
 
     // Calculate inter-peak intervals in seconds
     // Onset envelope is computed with ~10ms hop, so timeScale is 0.01 seconds per sample
-    final timeScale = signal.onsetTimeScale;
     final intervals = <double>[];
     for (var i = 1; i < peaks.length; i++) {
       intervals.add((peaks[i] - peaks[i - 1]) * timeScale);
@@ -61,6 +84,7 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
+    final medianInterval = _median(trimmedIntervals);
     final representativeInterval = _representativeInterval(trimmedIntervals);
     if (representativeInterval <= 0) {
       return null;
@@ -74,8 +98,50 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final bpm = 60.0 / selection.normalizedInterval;
-    final effectiveInterval = selection.normalizedInterval;
+    var effectiveInterval = selection.normalizedInterval;
+    final originalInterval =
+        selection.interval <= 0 ? effectiveInterval : selection.interval;
+    final sources = List<String>.from(selection.sources);
+    var adjustedToMedian = false;
+
+    if (medianInterval > 0 && selection.normalizedInterval > 0) {
+      final ratio = medianInterval / selection.normalizedInterval;
+      if ((ratio >= 1.35 && ratio <= 1.7) ||
+          (ratio >= 0.45 && ratio <= 0.7)) {
+        effectiveInterval = medianInterval;
+        if (!sources.contains('median_interval')) {
+          sources.add('median_interval');
+        }
+        adjustedToMedian = true;
+      }
+    }
+
+    var bpm = 60.0 / effectiveInterval;
+    final rangeAdjustment = bpm.isFinite && bpm > 0
+        ? AlgorithmUtils.coerceToRange(
+            bpm,
+            minBpm: signal.context.minBpm,
+            maxBpm: signal.context.maxBpm,
+          )
+        : null;
+
+    var rangeAdjusted = false;
+    if (rangeAdjustment != null &&
+        rangeAdjustment.bpm > 0 &&
+        ((rangeAdjustment.multiplier - 1.0).abs() > 0.01 ||
+            rangeAdjustment.clamped)) {
+      bpm = rangeAdjustment.bpm;
+      effectiveInterval = 60.0 / bpm;
+      rangeAdjusted = true;
+      if (!sources.contains('range_adjust')) {
+        sources.add('range_adjust');
+      }
+    }
+
+    final rangeMultiplier =
+        originalInterval == 0 ? 1.0 : effectiveInterval / originalInterval;
+    final rangeClamped =
+        rangeAdjusted || (rangeAdjustment?.clamped ?? false) || rangeMultiplier.abs() > 1.05;
 
     // Calculate variance of intervals (now in seconds)
     final variance = _variance(trimmedIntervals, effectiveInterval);
@@ -95,16 +161,21 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       'intervalVariance': variance,
       'peakCount': peaks.length,
       'effectiveInterval': effectiveInterval,
+      'medianInterval': medianInterval,
+      'representativeInterval': representativeInterval,
+      'maxInterval': trimmedIntervals.reduce(max),
       'candidateScores': selection.scoreMap,
       'clusterConsistency': clusterConsistency,
       'clusterStrength': clusterStrength,
       'totalScore': selection.totalScore,
       'baseBpm': 60.0 / selection.interval,
       'supporterCount': selection.supporters,
-      'rangeMultiplier': selection.multiplier,
-      'rangeClamped': selection.multiplier.abs() > 1.05,
-      'sources': selection.sources,
+      'rangeMultiplier': rangeMultiplier,
+      'rangeClamped': rangeClamped,
+      'sources': sources,
       'suppressedBuckets': selection.suppressedBpms,
+      'medianAdjustment': adjustedToMedian,
+      'rangeAdjustment': rangeAdjusted,
     };
 
     return BpmReading(
@@ -117,12 +188,16 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     );
   }
 
-  List<int> _detectPeaks(List<double> envelope) {
+  List<int> _detectPeaks(
+    List<double> envelope, {
+    required int minSeparation,
+  }) {
     final peaks = <int>[];
     final avg = envelope.reduce((a, b) => a + b) / envelope.length;
     final variance = envelope.fold<double>(0, (sum, value) => sum + pow(value - avg, 2));
     final std = sqrt((variance / envelope.length).clamp(0.0, double.infinity));
     final threshold = (avg + std * 0.3).clamp(0.15, 0.6);
+    int? lastPeak;
 
     for (var i = 2; i < envelope.length - 2; i++) {
       final current = envelope[i];
@@ -131,14 +206,33 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
           current >= envelope[i + 1] &&
           current > envelope[i - 2] &&
           current > envelope[i + 2]) {
+        if (lastPeak != null && (i - lastPeak) < minSeparation) {
+          if (current > envelope[lastPeak]) {
+            peaks.removeLast();
+            peaks.add(i);
+            lastPeak = i;
+          }
+          continue;
+        }
         peaks.add(i);
+        lastPeak = i;
       }
     }
 
     if (peaks.length < 2) {
       final indexed = List.generate(envelope.length, (index) => (index, envelope[index]))
         ..sort((a, b) => b.$2.compareTo(a.$2));
-      final fallback = indexed.take(4).map((entry) => entry.$1).toList()..sort();
+      final fallback = <int>[];
+      for (final entry in indexed) {
+        if (fallback.any((existing) => (entry.$1 - existing).abs() < minSeparation)) {
+          continue;
+        }
+        fallback.add(entry.$1);
+        if (fallback.length >= 4) {
+          break;
+        }
+      }
+      fallback.sort();
       return fallback.length >= 2 ? fallback : peaks;
     }
     return peaks;
@@ -230,7 +324,23 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       }
     }
 
-    return candidates.isEmpty ? filtered : candidates;
+    final baseList = candidates.isEmpty ? filtered : candidates;
+    final normalized = <double>[];
+    for (final value in baseList) {
+      var adjusted = value;
+      var guard = 0;
+      while (adjusted < minInterval * 0.98 && guard < 4) {
+        adjusted *= 2;
+        guard++;
+      }
+      while (adjusted > maxInterval * 1.02 && guard > -4) {
+        adjusted /= 2;
+        guard--;
+      }
+      normalized.add(adjusted);
+    }
+
+    return normalized;
   }
 
   double _representativeInterval(List<double> intervals) {
@@ -298,6 +408,22 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
         weight: baseWeight * 0.05,
         supporters: 0,
         source: 'half_interval',
+      );
+    }
+
+    final refinement = AlgorithmUtils.refineFromIntervals(
+      intervals: intervals,
+      minBpm: context.minBpm,
+      maxBpm: context.maxBpm,
+    );
+    if (refinement != null && refinement.consistency >= 0.35) {
+      final refinedInterval = 60.0 / refinement.bpm;
+      histogram.accumulate(
+        interval: refinedInterval,
+        weight: refinement.totalWeight *
+            (0.35 + 0.25 * refinement.consistency),
+        supporters: refinement.clusterSize,
+        source: 'refined_interval',
       );
     }
 
