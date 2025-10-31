@@ -1,7 +1,6 @@
 import 'dart:collection';
 import 'dart:math' as math;
 
-import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/core/consensus_interface.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
@@ -19,7 +18,8 @@ class RobustConsensusEngine implements ConsensusInterface {
     this.minReadingsForOutlierDetection = 3,
     this.algorithmOutlierThreshold =
         8.0, // BPM deviation for per-algorithm outlier
-    this.clusterTolerance = 3.0, // BPM tolerance for clustering
+    this.clusterTolerancePercent = 0.05, // 5% of tempo for clustering (adaptive)
+    this.clusterToleranceMinBpm = 2.5, // Minimum absolute BPM tolerance
     this.minClusterSize = 2, // Minimum algorithms to form valid cluster
     this.smoothingFactor = 0.25,
     this.consensusHistoryLimit = 20,
@@ -30,7 +30,8 @@ class RobustConsensusEngine implements ConsensusInterface {
   final int historySize;
   final int minReadingsForOutlierDetection;
   final double algorithmOutlierThreshold;
-  final double clusterTolerance;
+  final double clusterTolerancePercent;
+  final double clusterToleranceMinBpm;
   final int minClusterSize;
   final double smoothingFactor;
   final int consensusHistoryLimit;
@@ -148,7 +149,8 @@ class RobustConsensusEngine implements ConsensusInterface {
     _consensusHistory.clear();
   }
 
-  /// Normalize octave errors against evolving reference (current consensus or median).
+  /// Normalize harmonic errors against evolving reference (current consensus or median).
+  /// Handles common musical harmonics: octaves, fifths, fourths, thirds.
   List<BpmReading> _normalizeOctaveErrors(List<BpmReading> readings) {
     if (readings.isEmpty) {
       return readings;
@@ -163,27 +165,75 @@ class RobustConsensusEngine implements ConsensusInterface {
       }
     }
 
+    // Common musical harmonic ratios (sorted by musical importance)
+    final harmonicRatios = [
+      1.0,   // Unison (no change)
+      2.0,   // Octave up
+      0.5,   // Octave down
+      1.5,   // Perfect fifth up (3/2)
+      0.667, // Perfect fifth down (2/3)
+      1.333, // Perfect fourth up (4/3)
+      0.75,  // Perfect fourth down (3/4)
+      1.25,  // Major third up (5/4)
+      0.8,   // Major third down (4/5)
+      1.2,   // Minor third up (6/5)
+      0.833, // Minor third down (5/6)
+      3.0,   // Two octaves up
+      0.333, // Two octaves down
+    ];
+
     final normalized = <BpmReading>[];
     for (final reading in readings) {
-      final adjustedBpm = AlgorithmUtils.normalizeToReference(
-        reading.bpm,
-        reference,
-        minBpm: minBpm,
-        maxBpm: maxBpm,
-      );
+      // Find the best harmonic normalization
+      var bestBpm = reading.bpm;
+      var bestRatio = 1.0;
+      var bestDeviation = (reading.bpm - reference).abs();
+
+      // Only consider normalization if current reading is far from reference
+      // This prevents normalizing readings that are already reasonable
+      final minDeviationThreshold = math.max(5.0, reference * 0.08);
+
+      if (bestDeviation > minDeviationThreshold) {
+        for (final ratio in harmonicRatios) {
+          if (ratio == 1.0) continue; // Skip unison, we already have that
+
+          final candidateBpm = reading.bpm / ratio;
+
+          // Check if this candidate is in valid range
+          if (candidateBpm < minBpm || candidateBpm > maxBpm) {
+            continue;
+          }
+
+          // Calculate deviation from reference
+          final deviation = (candidateBpm - reference).abs();
+
+          // Only use this normalization if it significantly improves deviation
+          // Require at least 30% improvement to avoid spurious normalizations
+          if (deviation < bestDeviation * 0.7) {
+            bestDeviation = deviation;
+            bestBpm = candidateBpm;
+            bestRatio = ratio;
+          }
+        }
+      }
 
       final metadata = Map<String, Object?>.from(reading.metadata);
-      final factor = reading.bpm == 0 ? 1.0 : (adjustedBpm / reading.bpm).abs();
-      if ((factor - 1.0).abs() > 0.05) {
-        metadata['octaveNormalized'] = true;
-        metadata['octaveFactor'] = adjustedBpm / reading.bpm;
+      if ((bestRatio - 1.0).abs() > 0.05) {
+        metadata['harmonicNormalized'] = true;
+        metadata['harmonicRatio'] = bestRatio;
+        metadata['harmonicName'] = _harmonicName(bestRatio);
+        // Keep old octaveNormalized flag for backward compatibility
+        if (bestRatio == 2.0 || bestRatio == 0.5) {
+          metadata['octaveNormalized'] = true;
+          metadata['octaveFactor'] = bestBpm / reading.bpm;
+        }
       }
 
       normalized.add(
         BpmReading(
           algorithmId: reading.algorithmId,
           algorithmName: reading.algorithmName,
-          bpm: adjustedBpm,
+          bpm: bestBpm,
           confidence: reading.confidence,
           timestamp: reading.timestamp,
           metadata: metadata,
@@ -192,6 +242,23 @@ class RobustConsensusEngine implements ConsensusInterface {
     }
 
     return normalized;
+  }
+
+  /// Get human-readable name for harmonic ratio
+  String _harmonicName(double ratio) {
+    if ((ratio - 2.0).abs() < 0.05) return '2× (octave up)';
+    if ((ratio - 0.5).abs() < 0.05) return '0.5× (octave down)';
+    if ((ratio - 1.5).abs() < 0.05) return '1.5× (perfect fifth up)';
+    if ((ratio - 0.667).abs() < 0.05) return '0.67× (perfect fifth down)';
+    if ((ratio - 1.333).abs() < 0.05) return '1.33× (perfect fourth up)';
+    if ((ratio - 0.75).abs() < 0.05) return '0.75× (perfect fourth down)';
+    if ((ratio - 1.25).abs() < 0.05) return '1.25× (major third up)';
+    if ((ratio - 0.8).abs() < 0.05) return '0.8× (major third down)';
+    if ((ratio - 1.2).abs() < 0.05) return '1.2× (minor third up)';
+    if ((ratio - 0.833).abs() < 0.05) return '0.83× (minor third down)';
+    if ((ratio - 3.0).abs() < 0.05) return '3× (two octaves up)';
+    if ((ratio - 0.333).abs() < 0.05) return '0.33× (two octaves down)';
+    return '${ratio.toStringAsFixed(2)}×';
   }
 
   /// Update algorithm history and filter outliers within that algorithm's stream
@@ -240,6 +307,12 @@ class RobustConsensusEngine implements ConsensusInterface {
       final members = <BpmReading>[anchor];
       used.add(i);
 
+      // Calculate adaptive tolerance based on anchor tempo
+      final adaptiveTolerance = math.max(
+        clusterToleranceMinBpm,
+        anchor.bpm * clusterTolerancePercent,
+      );
+
       // Find all readings within tolerance of anchor
       for (int j = i + 1; j < readings.length; j++) {
         if (used.contains(j)) continue;
@@ -247,7 +320,7 @@ class RobustConsensusEngine implements ConsensusInterface {
         final candidate = readings[j];
         final deviation = (candidate.bpm - anchor.bpm).abs();
 
-        if (deviation <= clusterTolerance) {
+        if (deviation <= adaptiveTolerance) {
           members.add(candidate);
           used.add(j);
         }
@@ -486,28 +559,89 @@ class RobustConsensusEngine implements ConsensusInterface {
 
   double _readingWeight(BpmReading reading) {
     final base = reading.confidence.clamp(0.0, 1.0);
+
+    // Cluster consistency penalty
     final consistency =
         (reading.metadata['clusterConsistency'] as num?)?.toDouble() ?? 1.0;
+    final consistencyWeight = 0.5 + 0.5 * consistency.clamp(0.0, 1.0);
+
+    // Range multiplier penalty (enhanced)
     final multiplier =
         (reading.metadata['rangeMultiplier'] as num?)?.toDouble() ?? 1.0;
     final clamped = reading.metadata['rangeClamped'] == true;
     final multiplierWeight = _multiplierWeight(multiplier, clamped);
-    final octavePenalty =
-        reading.metadata['octaveNormalized'] == true ? 0.85 : 1.0;
+
+    // Count correction flags (more aggressive)
+    var correctionPenalty = 1.0;
+    var correctionCount = 0;
+    if (reading.metadata['rangeAdjustment'] == true) correctionCount++;
+    if (reading.metadata['medianAdjustment'] == true) correctionCount++;
+    if (reading.metadata['fundamentalGuardApplied'] == true) correctionCount++;
+    if (reading.metadata['octaveNormalized'] == true) correctionCount++;
+    if (reading.metadata['harmonicNormalized'] == true) {
+      // Harmonic normalization indicates algorithm was on wrong harmonic
+      final ratio =
+          (reading.metadata['harmonicRatio'] as num?)?.toDouble() ?? 1.0;
+      if ((ratio - 1.0).abs() > 0.05) {
+        correctionCount++;
+        // Extra penalty for non-octave harmonics (more problematic)
+        if (ratio != 2.0 && ratio != 0.5) {
+          correctionCount++;
+        }
+      }
+    }
+
+    // Heavy penalty for multiple corrections (indicates uncertainty)
+    if (correctionCount >= 3) {
+      correctionPenalty = 0.3; // Very aggressive
+    } else if (correctionCount >= 2) {
+      correctionPenalty = 0.5;
+    } else if (correctionCount == 1) {
+      correctionPenalty = 0.75;
+    }
+
+    // Suppressed buckets penalty (indicates harmonic confusion)
+    final suppressedBuckets = reading.metadata['suppressedBuckets'];
+    var suppressionPenalty = 1.0;
+    if (suppressedBuckets is List && suppressedBuckets.isNotEmpty) {
+      // More suppressed = more confusion
+      final suppressCount = suppressedBuckets.length;
+      suppressionPenalty = math.max(0.5, 1.0 - (suppressCount * 0.15));
+    }
+
+    // Histogram score ratio (if available) - indicates cluster strength
+    var histogramPenalty = 1.0;
+    final winningScore = (reading.metadata['winningScore'] as num?)?.toDouble();
+    final totalScore = (reading.metadata['totalScore'] as num?)?.toDouble();
+    if (winningScore != null && totalScore != null && totalScore > 0) {
+      final scoreRatio = (winningScore / totalScore).clamp(0.0, 1.0);
+      // Strong cluster = higher weight
+      histogramPenalty = 0.6 + 0.4 * scoreRatio;
+    }
+
+    // Combine all factors
     final weight = base *
-        (0.6 + 0.4 * consistency.clamp(0.0, 1.0)) *
+        consistencyWeight *
         multiplierWeight *
-        octavePenalty;
+        correctionPenalty *
+        suppressionPenalty *
+        histogramPenalty;
+
     var adjusted = weight;
+
+    // Tempogram/PLP source downweight
     final source = reading.metadata['source'];
     if (reading.algorithmId == 'plp_tempogram' || source == 'tempogram') {
       adjusted *= 0.75;
     }
+
+    // PLP strength modulation
     if (reading.metadata['strength'] is num) {
       adjusted *= (0.7 +
           0.3 *
               (reading.metadata['strength'] as num).toDouble().clamp(0.0, 1.0));
     }
+
     if (adjusted.isNaN || adjusted.isInfinite) {
       return 0.1;
     }
