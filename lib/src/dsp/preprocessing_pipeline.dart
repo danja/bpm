@@ -5,6 +5,7 @@ import '../algorithms/detection_context.dart';
 import '../models/bpm_models.dart';
 import 'filtering.dart';
 import 'mel_spectrogram.dart';
+import 'novelty.dart';
 import 'normalization.dart';
 import 'onset_detection.dart';
 import 'signal_utils.dart';
@@ -24,6 +25,8 @@ class PreprocessedSignal {
     required this.samples400Hz,
     required this.melSpectrogram,
     required this.melBandMeans,
+    required this.noveltyCurve,
+    required this.noveltyFeatureRate,
     required this.originalSampleRate,
     required this.duration,
     required this.context,
@@ -54,6 +57,12 @@ class PreprocessedSignal {
   /// Mean mel-band energy profile (length == number of mel bands)
   final Float32List melBandMeans;
 
+  /// Spectral-flux novelty curve (Tempogram toolbox inspired)
+  final Float32List noveltyCurve;
+
+  /// Feature rate of novelty curve (Hz)
+  final double noveltyFeatureRate;
+
   /// Original sample rate in Hz
   final int originalSampleRate;
 
@@ -83,6 +92,8 @@ class PreprocessedSignal {
 /// across different algorithms.
 class PreprocessingPipeline {
   const PreprocessingPipeline();
+
+  static final NoveltyComputer _noveltyComputer = NoveltyComputer();
 
   /// Processes audio frames into preprocessed signal.
   ///
@@ -148,6 +159,12 @@ class PreprocessingPipeline {
       maxFrequency: math.min(5000, sampleRate / 2),
     );
 
+    // Step 7: Compute spectral-flux novelty curve (bandwise)
+    final novelty = _noveltyComputer.compute(
+      frames: window,
+      context: context,
+    );
+
     return PreprocessedSignal(
       rawSamples: rawSamples,
       normalizedSamples: normalized,
@@ -157,6 +174,8 @@ class PreprocessingPipeline {
       samples400Hz: samples400Hz,
       melSpectrogram: melFeatures.frames,
       melBandMeans: melFeatures.meanBands,
+      noveltyCurve: novelty.curve,
+      noveltyFeatureRate: novelty.featureRate,
       originalSampleRate: sampleRate,
       duration: duration,
       context: context,
@@ -195,6 +214,8 @@ class PreprocessingPipeline {
       samples400Hz: empty,
       melSpectrogram: const [],
       melBandMeans: Float32List(0),
+      noveltyCurve: empty,
+      noveltyFeatureRate: 0,
       originalSampleRate: context.sampleRate,
       duration: Duration.zero,
       context: context,

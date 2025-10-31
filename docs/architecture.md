@@ -41,10 +41,11 @@ This project follows the layered structure defined in [`docs/PLAN-01.md`](PLAN-0
 
 Implemented detectors live under `lib/src/algorithms/` and share the `BpmDetectionAlgorithm` interface. Details + references in [`docs/algorithms.md`](algorithms.md). Accuracy stabilization work is tracked in [`docs/PLAN-03.md`](PLAN-03.md).
 
-1. **Simple Onset** (`simple_onset_algorithm.dart`) — Short-time energy and peak spacing. Week‑1 PLAN‑03 updates add duration-weighted interval histograms, harmonic penalties, and richer metadata for consensus.
+1. **Simple Onset** (`simple_onset_algorithm.dart`) — Short-time energy and peak spacing. Week‑1 PLAN‑03 updates add duration-weighted interval histograms, harmonic penalties, and richer metadata for consensus. Next iteration will layer in bandwise spectral-flux novelty cues (inspired by Tempogram Toolbox) ahead of histogram voting.
 2. **Autocorrelation** (`autocorrelation_algorithm.dart`) — Time-domain periodicity scan.
 3. **FFT Spectrum** (`fft_spectrum_algorithm.dart`) — Frequency-domain peak picking.
 4. **Wavelet Energy** (`wavelet_energy_algorithm.dart`) — Multiresolution Haar bands with aggregation + fallback.
+5. **(Planned)** Predominant Local Pulse (PLP) consensus stream derived from tempograms to provide an auxiliary tempo cue when primary algorithms disagree.
 
 An `AlgorithmRegistry` aggregates the active algorithms; swapping additions/removals happens in `lib/src/app.dart`.
 

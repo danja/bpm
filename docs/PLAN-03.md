@@ -34,7 +34,8 @@
 
 - ✅ Added histogram-based fundamental selector for `SimpleOnsetAlgorithm` with duration-weighted bins and harmonic penalties.
 - ✅ Expanded per-reading metadata (bucket scores, multipliers, supporter counts) surfaced to consensus and integration tests.
-- ⏳ Remaining: apply histogram/harmonic filtering to Autocorrelation, integrate onset-weighted lag gating, and finalise adaptive threshold tuning.
+- ⏳ Remaining: propagate the same histogram weighting to Autocorrelation (initial lag histogram landed), retune penalties via WAV fixtures, and finalise adaptive threshold tuning.
+- 🔍 **New insight (Tempogram Toolbox)**: plan to integrate a bandwise spectral-flux novelty curve with logarithmic compression and adaptive differentiation (cf. `audio_to_noveltyCurve.m`) to strengthen onset detection on weak-transient material.
 
 1. **Interval histogramming**
    - Build histograms over inter-onset intervals (quantized bins) to identify dominant periodicities.
@@ -56,6 +57,7 @@
 1. **Metadata-weighted consensus scoring**
    - Combine cluster consistency, harmonic multiplier deviations, and correction flags to compute per-reading reliability.
    - Introduce rules penalizing consensus if algorithms are split across harmonic families (e.g., some at ~½, some at ~2× fundamental).
+   - Incorporate novel pulse cues: feed predominant local pulse (PLP) curves from a tempogram (`tempogram_to_PLPcurve.m`) as an auxiliary consensus source.
 
 2. **Confidence semantics refresh**
    - Map confidence into qualitative tiers (High/Medium/Low) using empirical thresholds derived from validation runs.
@@ -66,7 +68,7 @@
 1. **WAV fixture suite**
    - Curate fixtures: steady metronome (60–180 BPM), live drum loop, electronic track with syncopation, tempo ramp, noise-heavy clip.
    - Extend integration tests to cover each algorithm + consensus on all fixtures, with per-fixture tolerances.
-   - Add CLI harness (`tool/bpm_wav_regression.dart`) to batch-run fixtures and report deltas vs. baselines.
+   - Add CLI harness (`tool/bpm_wav_regression.dart`) to batch-run fixtures, report deltas vs. baselines, and log novelty/PLP diagnostics for analysis.
 
 2. **CI & reporting**
    - Integrate fixtures into CI with caching (e.g., storing WAVs in git LFS or artifact bucket).

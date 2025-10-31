@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
-import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/interval_histogram.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/models/bpm_models.dart';
 
@@ -104,6 +104,7 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       'rangeMultiplier': selection.multiplier,
       'rangeClamped': selection.multiplier.abs() > 1.05,
       'sources': selection.sources,
+      'suppressedBuckets': selection.suppressedBpms,
     };
 
     return BpmReading(
@@ -248,149 +249,61 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     return _median(slice);
   }
 
-_TempoSelection? _selectTempoCandidate({
-  required List<double> intervals,
-  required DetectionContext context,
-}) {
-  const binSize = 0.02; // 20ms histogram bins
-  if (intervals.isEmpty) {
-    return null;
-  }
-
-  final sorted = List<double>.from(intervals.where((value) => value > 0))
-    ..sort();
-  if (sorted.isEmpty) {
-    return null;
-  }
-
-  final startIndex = (sorted.length * 0.4).floor().clamp(0, sorted.length - 1);
-  final dominantIntervals = sorted.sublist(startIndex);
-
-  final buckets = <double, _HistogramBucket>{};
-
-  void accumulate(
-    double rawInterval,
-    double weight,
-    int supporters,
-    String source,
-  ) {
-    if (rawInterval <= 0 || weight <= 0) return;
-    final normalized = _normalizeInterval(rawInterval, context);
-    if (normalized <= 0) return;
-    final bin = (normalized / binSize).round() * binSize;
-    final bucket =
-        buckets.putIfAbsent(bin, () => _HistogramBucket(interval: bin));
-    bucket.add(weight: weight, supporters: supporters, source: source);
-  }
-
-  for (final interval in dominantIntervals) {
-    final baseWeight = interval * interval;
-    accumulate(interval, baseWeight, 1, 'interval');
-    accumulate(interval * 2, baseWeight * 0.25, 0, 'double_interval');
-    accumulate(interval * 3, baseWeight * 0.15, 0, 'triple_interval');
-    accumulate(interval / 2, baseWeight * 0.1, 0, 'half_interval');
-  }
-
-  if (buckets.isEmpty) {
-    return null;
-  }
-
-  final bucketList = buckets.values.toList()
-    ..sort((a, b) {
-      final scoreCompare = b.score.compareTo(a.score);
-      if (scoreCompare != 0) {
-        return scoreCompare;
-      }
-      return a.interval.compareTo(b.interval);
-    });
-
-  final primary = bucketList.first;
-  var selected = primary;
-
-  for (final bucket in bucketList) {
-    final bpm = 60.0 / bucket.interval;
-    final primaryBpm = 60.0 / primary.interval;
-    if (bpm <= primaryBpm / 1.6 &&
-        bucket.score >= primary.score * 0.6) {
-      selected = bucket;
-      break;
+  HistogramSelection? _selectTempoCandidate({
+    required List<double> intervals,
+    required DetectionContext context,
+  }) {
+    const binSize = 0.02; // 20ms histogram bins
+    if (intervals.isEmpty) {
+      return null;
     }
-  }
 
-  final normalizedInterval = _normalizeInterval(selected.interval, context);
-  if (normalizedInterval <= 0) {
-    return null;
-  }
-
-  final multiplier = normalizedInterval / selected.interval;
-  final scoreMap = <double, double>{
-    for (final bucket in bucketList) 60.0 / bucket.interval: bucket.score,
-  };
-  final totalScore =
-      bucketList.fold<double>(0, (sum, bucket) => sum + bucket.score);
-
-  return _TempoSelection(
-    interval: selected.interval,
-    normalizedInterval: normalizedInterval,
-    score: selected.score,
-    totalScore: totalScore,
-    supporters: selected.count,
-    scoreMap: scoreMap,
-    multiplier: multiplier,
-    sources: selected.sources.toList(),
-  );
-}
-
-  double _normalizeInterval(double interval, DetectionContext context) {
-    var value = interval;
-    var guard = 0;
-    while (value > 0 && 60.0 / value > context.maxBpm && guard < 6) {
-      value *= 2;
-      guard++;
+    final sorted = List<double>.from(intervals.where((value) => value > 0))
+      ..sort();
+    if (sorted.isEmpty) {
+      return null;
     }
-    while (value > 0 && 60.0 / value < context.minBpm && guard > -6) {
-      value /= 2;
-      guard--;
+
+    final startIndex =
+        (sorted.length * 0.4).floor().clamp(0, sorted.length - 1);
+    final dominantIntervals = sorted.sublist(startIndex);
+
+    final histogram = IntervalHistogram(
+      context: context,
+      binSize: binSize,
+    );
+
+    for (final interval in dominantIntervals) {
+      final baseWeight = interval * interval;
+      histogram.accumulate(
+        interval: interval,
+        weight: baseWeight,
+        supporters: 1,
+        source: 'interval',
+      );
+      histogram.accumulate(
+        interval: interval * 2,
+        weight: baseWeight * 0.18,
+        supporters: 0,
+        source: 'double_interval',
+      );
+      histogram.accumulate(
+        interval: interval * 3,
+        weight: baseWeight * 0.1,
+        supporters: 0,
+        source: 'triple_interval',
+      );
+      histogram.accumulate(
+        interval: interval / 2,
+        weight: baseWeight * 0.05,
+        supporters: 0,
+        source: 'half_interval',
+      );
     }
-    return value <= 0 ? 0 : value;
+
+    histogram.applyLengthBoost();
+    histogram.suppressShorterHarmonics(minShare: 0.22);
+
+    return histogram.select();
   }
-}
-
-class _TempoSelection {
-  const _TempoSelection({
-    required this.interval,
-    required this.normalizedInterval,
-    required this.score,
-    required this.totalScore,
-    required this.supporters,
-    required this.scoreMap,
-    required this.multiplier,
-    required this.sources,
-  });
-
-  final double interval;
-  final double normalizedInterval;
-  final double score;
-  final double totalScore;
-  final int supporters;
-  final Map<double, double> scoreMap;
-  final double multiplier;
-  final List<String> sources;
-}
-
-class _HistogramBucket {
-  _HistogramBucket({required this.interval});
-
-  final double interval;
-  double weight = 0;
-  int count = 0;
-  final Set<String> sources = <String>{};
-
-  void add({required double weight, required int supporters, required String source}) {
-    this.weight += weight;
-    count += supporters;
-    sources.add(source);
-  }
-
-  double get score => weight * interval;
 }

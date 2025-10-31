@@ -93,6 +93,8 @@ This document summarizes the signal-processing approaches currently implemented 
 - **Probabilistic Tempo Models**: Incorporate tempo dynamics (e.g., particle filters or Bayesian tempo trackers as in Bello & Ellis 2005) to smooth per-window jitter.
 - **Neural Frontends**: Replace handcrafted features with lightweight CNN onset detectors (`Madmom`-style) when NN inference is viable on-device.
 - **Adaptive Buffering**: Allow algorithms to request longer windows (e.g., 20–30 s) when confidences remain low, trading latency for accuracy.
+- **Bandwise Spectral-Flux Novelty**: Integrate the Tempogram Toolbox approach (`audio_to_noveltyCurve.m`) with logarithmic compression and adaptive differentiators to strengthen onset detection on weak transients.
+- **Predominant Local Pulse (PLP)**: Derive PLP curves from complex tempograms (`tempogram_to_PLPcurve.m`) and feed them into consensus weighting when primary detectors disagree on the fundamental tempo.
 
 ## Reference List
 

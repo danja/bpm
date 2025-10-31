@@ -12,6 +12,9 @@ flutter analyze
 
 flutter test
 
+flutter test --reporter compact > test-results.txt
+
+
 adb install -r apk/app-release.apk
 
 adb install -r apk/app-debug.apk
