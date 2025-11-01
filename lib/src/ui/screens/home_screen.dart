@@ -1,11 +1,8 @@
-import 'dart:ui' show FontFeature;
-
 import 'package:bpm/src/models/bpm_models.dart';
 import 'package:bpm/src/state/bpm_cubit.dart';
 import 'package:bpm/src/state/bpm_state.dart';
-import 'package:bpm/src/ui/widgets/audio_oscilloscope.dart';
 import 'package:bpm/src/ui/widgets/bpm_summary_card.dart';
-import 'package:bpm/src/ui/widgets/bpm_trend_sparkline.dart';
+import 'package:bpm/src/ui/widgets/tempogram_visualizer.dart';
 import 'package:bpm/src/ui/widgets/app_console.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -34,17 +31,14 @@ class HomeScreen extends StatelessWidget {
                 ),
                 child: ListView(
                   children: [
-                    AudioOscilloscope(
-                      samples: state.previewSamples,
-                      status: state.status,
+                    // Tempogram visualization (replaces oscilloscope)
+                    TempogramVisualizer(
+                      tempogram: state.tempogram,
+                      status: state.status.name,
                     ),
                     const SizedBox(height: 12),
                     BpmSummaryCard(state: state),
                     const SizedBox(height: 12),
-                    if (state.history.length >= 2) ...[
-                      BpmTrendSparkline(history: state.history),
-                      const SizedBox(height: 12),
-                    ],
                     _StatusBanner(state: state),
                   ],
                 ),
@@ -166,9 +160,7 @@ class _ElapsedClock extends StatelessWidget {
         final minutes = viewModel.elapsed.inMinutes;
         final seconds = viewModel.elapsed.inSeconds.remainder(60);
         final safeMinutes = minutes.clamp(0, 999);
-        final minuteText = safeMinutes is int
-            ? safeMinutes.toString().padLeft(2, '0')
-            : safeMinutes.round().toString().padLeft(2, '0');
+        final minuteText = safeMinutes.toString().padLeft(2, '0');
         final text = '$minuteText:${seconds.toString().padLeft(2, '0')}';
         final theme = Theme.of(context);
         final baseStyle = theme.textTheme.titleMedium ??

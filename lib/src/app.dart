@@ -2,6 +2,7 @@ import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/dynamic_programming_beat_tracker.dart';
 import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
@@ -23,6 +24,7 @@ class BpmApp extends StatelessWidget {
     const enableAutocorrelation = true;
     const enableFftSpectrum = true;
     const enableWavelet = true;
+    const enableDynamicBeatTracker = true;
     final algorithms = <BpmDetectionAlgorithm>[
       SimpleOnsetAlgorithm(), // Fast energy-based detection (now more sensitive)
     ];
@@ -33,7 +35,11 @@ class BpmApp extends StatelessWidget {
       algorithms.add(AutocorrelationAlgorithm());
     }
     if (enableWavelet) {
-      algorithms.add(WaveletEnergyAlgorithm(levels: 2)); // Optimized to 2 levels for speed
+      algorithms.add(
+          WaveletEnergyAlgorithm(levels: 2)); // Optimized to 2 levels for speed
+    }
+    if (enableDynamicBeatTracker) {
+      algorithms.add(DynamicProgrammingBeatTracker());
     }
 
     final registry = AlgorithmRegistry(algorithms);
@@ -44,9 +50,12 @@ class BpmApp extends StatelessWidget {
       registry: registry,
       consensusEngine: RobustConsensusEngine(
         historySize: 10, // Track last 10 readings per algorithm
-        minReadingsForOutlierDetection: 3, // Need 3 readings before rejecting outliers
-        algorithmOutlierThreshold: 8.0, // Reject if >8 BPM from algorithm's own median
-        clusterTolerance: 3.0, // Algorithms within 3 BPM cluster together
+        minReadingsForOutlierDetection:
+            3, // Need 3 readings before rejecting outliers
+        algorithmOutlierThreshold:
+            8.0, // Reject if >8 BPM from algorithm's own median
+        clusterTolerancePercent: 0.05, // 5% of tempo for adaptive clustering
+        clusterToleranceMinBpm: 2.5, // Minimum 2.5 BPM cluster tolerance
         minClusterSize: 2, // Need 2+ algorithms agreeing
         smoothingFactor: 0.25, // Moderate smoothing
       ),

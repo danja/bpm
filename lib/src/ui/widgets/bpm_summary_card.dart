@@ -11,13 +11,6 @@ class BpmSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final consensus = state.consensus;
     final textTheme = Theme.of(context).textTheme;
-    final plpPanel = state.plpBpm != null
-        ? _PlpPanel(
-            bpm: state.plpBpm!,
-            strength: state.plpStrength,
-            trace: state.plpTrace,
-          )
-        : null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -26,10 +19,6 @@ class BpmSummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ..._algorithmRows(context),
-            if (plpPanel != null) ...[
-              const SizedBox(height: 8),
-              plpPanel,
-            ],
             const Divider(height: 20),
             Text('Consensus BPM', style: textTheme.titleMedium),
             const SizedBox(height: 4),
@@ -71,158 +60,85 @@ class BpmSummaryCard extends StatelessWidget {
   }
 
   List<Widget> _algorithmRows(BuildContext context) {
-    const algorithms = [
-      ('simple_onset', 'Onset Energy'),
-      ('autocorrelation', 'Autocorrelation'),
-      ('fft_spectrum', 'FFT Spectrum'),
-      ('wavelet_energy', 'Wavelet Energy'),
-    ];
-
     final readingById = {
       for (final reading in state.readings) reading.algorithmId: reading
     };
 
+    final algorithms = <(String, String)>[
+      ('simple_onset', 'Onset Energy'),
+      ('autocorrelation', 'Autocorrelation'),
+      ('fft_spectrum', 'FFT Spectrum'),
+    ];
+    if (readingById.containsKey('dp_beat_tracker')) {
+      algorithms.add(('dp_beat_tracker', 'Dynamic Beat Tracker'));
+    }
+    algorithms.add(('wavelet_energy', 'Wavelet Energy'));
+
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return algorithms.map(
-      (entry) {
-        final reading = readingById[entry.$1];
-        final bpmText =
-            reading != null ? '${reading.bpm.toStringAsFixed(1)} BPM' : '— BPM';
-        final confidence = reading?.confidence ?? 0;
+    final rows = <Widget>[];
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      entry.$2,
-                      style: textTheme.titleSmall,
-                    ),
-                  ),
-                  Text(
-                    bpmText,
-                    style: textTheme.titleMedium,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              LinearProgressIndicator(
-                value: confidence.clamp(0.0, 1.0),
-                minHeight: 4,
-              ),
-            ],
-          ),
-        );
-      },
-    ).toList();
+    for (final entry in algorithms) {
+      final reading = readingById[entry.$1];
+      rows.add(_metricRow(
+        context: context,
+        label: entry.$2,
+        bpm: reading?.bpm,
+        confidence: reading?.confidence ?? 0,
+      ));
+
+      if (entry.$1 == 'simple_onset' && state.plpBpm != null) {
+        rows.add(_metricRow(
+          context: context,
+          label: 'Predominant Pulse',
+          bpm: state.plpBpm,
+          confidence: (state.plpStrength ?? 0).clamp(0.0, 1.0).toDouble(),
+        ));
+      }
+    }
+
+    return rows;
   }
-}
 
-class _PlpPanel extends StatelessWidget {
-  const _PlpPanel({
-    required this.bpm,
-    this.strength,
-    required this.trace,
-  });
-
-  final double bpm;
-  final double? strength;
-  final List<double> trace;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final recent = trace.isNotEmpty ? trace[trace.length - 1] : null;
-    final sampleCount = trace.length;
-    final startIndex = sampleCount > 20 ? sampleCount - 20 : 0;
-    double? minValue;
-    double? maxValue;
-    for (var i = startIndex; i < sampleCount; i++) {
-      final value = trace[i];
-      minValue = minValue == null
-          ? value
-          : value < minValue
-              ? value
-              : minValue;
-      maxValue = maxValue == null
-          ? value
-          : value > maxValue
-              ? value
-              : maxValue;
-    }
-    final strengthPercent = strength == null
-        ? null
-        : (strength!.clamp(0.0, 1.0) * 100).toStringAsFixed(0);
-
-    String rangeText;
-    if (minValue != null && maxValue != null && (maxValue - minValue) > 0.1) {
-      rangeText =
-          'Range ≈ ${minValue.toStringAsFixed(0)} – ${maxValue.toStringAsFixed(0)} BPM';
-    } else {
-      rangeText =
-          'Stable at ${recent?.toStringAsFixed(1) ?? bpm.toStringAsFixed(1)} BPM';
-    }
+  Widget _metricRow({
+    required BuildContext context,
+    required String label,
+    required double? bpm,
+    required double confidence,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final bpmText = bpm != null ? '${bpm.toStringAsFixed(1)} BPM' : '— BPM';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(12),
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Predominant Pulse (PLP)',
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: theme.colorScheme.onSecondaryContainer,
-            ),
-          ),
-          const SizedBox(height: 6),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                bpm.toStringAsFixed(1),
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: theme.colorScheme.onSecondaryContainer,
+              Expanded(
+                child: Text(
+                  label,
+                  style: textTheme.titleSmall,
                 ),
               ),
-              const SizedBox(width: 6),
               Text(
-                'BPM',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.onSecondaryContainer,
-                ),
+                bpmText,
+                style: textTheme.titleMedium,
               ),
-              if (strengthPercent != null) ...[
-                const SizedBox(width: 12),
-                Text(
-                  'Strength $strengthPercent%',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSecondaryContainer,
-                  ),
-                ),
-              ],
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            rangeText,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSecondaryContainer.withOpacity(0.8),
-            ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: confidence.clamp(0.0, 1.0),
+            minHeight: 4,
           ),
         ],
       ),

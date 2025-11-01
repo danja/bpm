@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:bpm/src/algorithms/algorithm_registry.dart';
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/dynamic_programming_beat_tracker.dart';
 import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
@@ -40,6 +40,7 @@ class BpmDetectorCoordinator {
   List<BpmReading> _latestReadings = const [];
   ConsensusResult? _latestConsensus;
   BpmReading? _lastWaveletReading;
+  final Map<String, BpmReading> _readingCache = <String, BpmReading>{};
   double? _latestPlpBpm;
   double? _latestPlpStrength;
   Float32List? _latestPlpTrace;
@@ -65,6 +66,7 @@ class BpmDetectorCoordinator {
     _lastWaveletReading = null;
     _waveletRunning = false;
     _lastWaveletRun = null;
+    _readingCache.clear();
     _latestPlpBpm = null;
     _latestPlpStrength = null;
     _latestPlpTrace = null;
@@ -319,6 +321,9 @@ class BpmDetectorCoordinator {
         }
 
         final filtered = readings.toList();
+        for (final reading in filtered) {
+          _readingCache[reading.algorithmId] = reading;
+        }
 
         final consensusInputs = List<BpmReading>.from(filtered);
         if (_latestPlpBpm != null && _latestPlpBpm! > 0) {
@@ -338,11 +343,17 @@ class BpmDetectorCoordinator {
           consensusInputs.add(plpReading);
         }
 
-        final displayReadings = List<BpmReading>.from(filtered);
-        if (_lastWaveletReading != null) {
-          displayReadings.add(_lastWaveletReading!);
+        final orderedReadings = <BpmReading>[];
+        for (final algorithm in registry.algorithms) {
+          final cached = _readingCache[algorithm.id];
+          if (cached != null) {
+            orderedReadings.add(cached);
+          }
         }
-        _latestReadings = displayReadings;
+        if (_lastWaveletReading != null) {
+          orderedReadings.add(_lastWaveletReading!);
+        }
+        _latestReadings = orderedReadings;
         _latestConsensus = consensusEngine.combine(consensusInputs);
 
         if (_latestConsensus != null) {
@@ -472,10 +483,27 @@ class BpmDetectorCoordinator {
         }
         if (waveletReading != null) {
           _lastWaveletReading = waveletReading;
+          _readingCache[waveletReading.algorithmId] = waveletReading;
+        }
+
+        for (final reading in merged) {
+          if (reading.algorithmId != 'wavelet_energy') {
+            _readingCache[reading.algorithmId] = reading;
+          }
         }
 
         final mergedWithWavelet = List<BpmReading>.from(merged);
-        _latestReadings = mergedWithWavelet;
+        final orderedReadings = <BpmReading>[];
+        for (final algorithm in registry.algorithms) {
+          final cached = _readingCache[algorithm.id];
+          if (cached != null) {
+            orderedReadings.add(cached);
+          }
+        }
+        if (_lastWaveletReading != null) {
+          orderedReadings.add(_lastWaveletReading!);
+        }
+        _latestReadings = orderedReadings;
         final consensusInputs = List<BpmReading>.from(mergedWithWavelet);
         if (_latestPlpBpm != null && _latestPlpBpm! > 0) {
           final strength = (_latestPlpStrength ?? 0).clamp(0.0, 1.0);
@@ -703,6 +731,9 @@ Future<Map<String, Object?>> _runAlgorithmsInIsolate(
           break;
         case 'wavelet_energy':
           algorithm = WaveletEnergyAlgorithm();
+          break;
+        case 'dp_beat_tracker':
+          algorithm = DynamicProgrammingBeatTracker();
           break;
         default:
           continue;

@@ -40,6 +40,7 @@ class RecordAudioStreamSource implements AudioStreamSource {
       bitRate: config.sampleRate * 16 * config.channels,
       sampleRate: config.sampleRate,
       numChannels: config.channels,
+      autoGain: true,
     );
 
     _logger.info('Starting recorder with config: sampleRate=${config.sampleRate}, channels=${config.channels}', source: 'Audio');

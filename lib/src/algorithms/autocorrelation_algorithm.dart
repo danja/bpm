@@ -111,40 +111,60 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       binSize: 0.02,
     );
 
-    lagScores.forEach((lag, score) {
-      if (lag <= 0 || score <= 0) return;
+    // Only include lags with significant scores (top 50% or score > 0.3 * bestScore)
+    final scoreThreshold = math.max(bestScore * 0.3, 0.01);
+    final significantLags = lagScores.entries
+        .where((entry) => entry.value >= scoreThreshold)
+        .toList();
+
+    for (final entry in significantLags) {
+      final lag = entry.key;
+      final score = entry.value;
+      if (lag <= 0 || score <= 0) continue;
+
       final interval = lag / effectiveSampleRate;
-      final baseWeight = interval * interval * score;
+      // Weight more heavily by score - emphasize strong peaks
+      final baseWeight = interval * interval * score * score;
+
+      // Only add the primary interval - don't pollute with harmonics
       histogram.accumulate(
         interval: interval,
         weight: baseWeight,
         supporters: 1,
         source: 'lag',
       );
-      histogram.accumulate(
-        interval: interval * 2,
-        weight: baseWeight * 0.2,
-        supporters: 0,
-        source: 'lag_double',
-      );
-      histogram.accumulate(
-        interval: interval / 2,
-        weight: baseWeight * 0.08,
-        supporters: 0,
-        source: 'half_lag',
-      );
-    });
+
+      // Only add half/double for very strong peaks (>0.7 * best)
+      if (score > bestScore * 0.7) {
+        histogram.accumulate(
+          interval: interval * 2,
+          weight: baseWeight * 0.05, // Reduced from 0.2
+          supporters: 0,
+          source: 'lag_double',
+        );
+        histogram.accumulate(
+          interval: interval / 2,
+          weight: baseWeight * 0.02, // Reduced from 0.08
+          supporters: 0,
+          source: 'half_lag',
+        );
+      }
+    }
 
     histogram.applyLengthBoost();
-    histogram.suppressShorterHarmonics(minShare: 0.2, suppressionFactor: 0.1);
+    histogram.suppressShorterHarmonics(minShare: 0.15, suppressionFactor: 0.05);
 
     final histogramSelection = histogram.select();
     final candidates = histogram.toTempoCandidates();
+
+    // Add the raw best lag with strong weight - this is our most reliable estimate
     if (bestLag > 0 && bestScore > 0 && rawBpm.isFinite) {
+      // Weight the best lag very heavily - it should dominate unless histogram has strong consensus
+      final bestLagWeight = bestScore * 3.0; // Increased from 1.0
       candidates.add(
         TempoCandidate(
           bpm: rawBpm,
-          weight: bestScore,
+          weight: bestLagWeight,
           source: 'best_lag',
         ),
       );

@@ -111,20 +111,31 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         ? 1
         : totalMagnitude / (maxIndex - minIndex + 1);
 
+    // Emphasize the peak strongly - it's our most reliable signal
+    // Only add harmonics if peak magnitude is strong relative to average
+    final peakStrength = bestMagnitude / (averageMagnitude + 1e-6);
     final neighbors = <TempoCandidate>[
       TempoCandidate(
         bpm: bestBpm,
-        weight: 1.0,
+        weight: 3.0, // Heavily weight the peak (was 1.0)
         source: 'peak',
         allowHarmonics: false,
       ),
-      TempoCandidate(bpm: bestBpm / 2, weight: 0.55, source: 'half'),
-      TempoCandidate(bpm: bestBpm * 2, weight: 0.5, source: 'double'),
-      TempoCandidate(bpm: bestBpm * 1.5, weight: 0.35, source: 'three-halves'),
-      TempoCandidate(bpm: bestBpm * 2 / 3, weight: 0.35, source: 'two-thirds'),
     ];
 
-    // Add nearby spectral bins as candidates for clustering.
+    // Only add harmonic candidates if peak is not dominant
+    // If peak is very strong (>4× average), don't confuse with harmonics
+    if (peakStrength < 4.0) {
+      neighbors.addAll([
+        TempoCandidate(bpm: bestBpm / 2, weight: 0.15, source: 'half'), // Reduced from 0.55
+        TempoCandidate(bpm: bestBpm * 2, weight: 0.1, source: 'double'), // Reduced from 0.5
+        TempoCandidate(bpm: bestBpm * 1.5, weight: 0.08, source: 'three-halves'), // Reduced from 0.35
+        TempoCandidate(bpm: bestBpm * 2 / 3, weight: 0.08, source: 'two-thirds'), // Reduced from 0.35
+      ]);
+    }
+
+    // Add nearby spectral bins as candidates for clustering
+    // Only add if they're significant (>50% of peak magnitude)
     for (var offset = 1; offset <= 2; offset++) {
       final index = _bestMagnitudeIndex(
         spectrum.magnitudes,
@@ -135,18 +146,21 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         offset,
       );
       if (index != null) {
-        final freqHz = index * freqResolution;
-        final bpmCandidate = freqHz * 60;
         final magnitude = spectrum.magnitudes[index];
-        final weight = (magnitude / (bestMagnitude + 1e-6)).clamp(0.2, 1.0);
-        neighbors.add(
-          TempoCandidate(
-            bpm: bpmCandidate,
-            weight: weight,
-            source: 'neighbor_$offset',
-            allowHarmonics: false,
-          ),
-        );
+        // Only include neighbors if they're strong enough
+        if (magnitude > bestMagnitude * 0.5) {
+          final freqHz = index * freqResolution;
+          final bpmCandidate = freqHz * 60;
+          final weight = (magnitude / (bestMagnitude + 1e-6)).clamp(0.3, 1.5);
+          neighbors.add(
+            TempoCandidate(
+              bpm: bpmCandidate,
+              weight: weight,
+              source: 'neighbor_$offset',
+              allowHarmonics: false,
+            ),
+          );
+        }
       }
     }
 
@@ -177,7 +191,9 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     if (refinement != null) {
       bpm = refinement.bpm;
       final avgMultiplier = refinement.averageMultiplier.abs();
-      if ((avgMultiplier - 1.0).abs() > 0.25 && peakAdjustment != null) {
+      // More aggressive fundamental guard - apply if multiplier deviates >15% (was 25%)
+      // This prevents harmonic candidates from winning
+      if ((avgMultiplier - 1.0).abs() > 0.15 && peakAdjustment != null) {
         bpm = peakAdjustment.bpm;
         fundamentalGuardApplied = true;
       }

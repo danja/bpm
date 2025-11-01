@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:bpm/src/algorithms/detection_context.dart';
-import 'package:bpm/src/dsp/novelty.dart';
 import 'package:bpm/src/dsp/preprocessing_pipeline.dart';
 import 'package:bpm/src/dsp/tempogram.dart';
 import 'package:test/test.dart';

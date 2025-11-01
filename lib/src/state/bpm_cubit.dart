@@ -81,7 +81,12 @@ class BpmCubit extends Cubit<BpmState> {
     _subscription = null;
     await _repository.stop();
     _stopElapsedTicker();
-    emit(BpmState.initial());
+    emit(
+      state.copyWith(
+        status: DetectionStatus.idle,
+        resetStartTime: true,
+      ),
+    );
   }
 
   @override

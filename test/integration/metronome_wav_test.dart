@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:bpm/src/algorithms/autocorrelation_algorithm.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
 import 'package:bpm/src/algorithms/detection_context.dart';
+import 'package:bpm/src/algorithms/dynamic_programming_beat_tracker.dart';
 import 'package:bpm/src/algorithms/fft_spectrum_algorithm.dart';
 import 'package:bpm/src/algorithms/simple_onset_algorithm.dart';
 import 'package:bpm/src/algorithms/wavelet_energy_algorithm.dart';
@@ -56,7 +57,8 @@ void main() {
         test('Robust consensus aligns with fixture', () async {
           final readings = <BpmReading>[];
           for (final config in _algorithmConfigs) {
-            final reading = await config.builder().analyze(signal: fixture.signal);
+            final reading =
+                await config.builder().analyze(signal: fixture.signal);
             if (reading != null) {
               readings.add(reading);
             }
@@ -167,6 +169,14 @@ final _algorithmConfigs = <_AlgorithmConfig>[
     percentTolerance: 0.08,
   ),
   _AlgorithmConfig(
+    id: 'dp_beat_tracker',
+    label: 'Dynamic beat tracker',
+    tolerance: 3.0,
+    minConfidence: 0.15,
+    builder: DynamicProgrammingBeatTracker.new,
+    percentTolerance: 0.08,
+  ),
+  _AlgorithmConfig(
     id: 'wavelet_energy',
     label: 'Wavelet energy',
     tolerance: 3.0,
@@ -207,8 +217,7 @@ List<_WavFixture> _loadFixtures() {
       minBpm: minBpm,
       maxBpm: maxBpm,
       windowDuration: Duration(
-        microseconds:
-            (wav.samples.length / wav.sampleRate * 1000000).round(),
+        microseconds: (wav.samples.length / wav.sampleRate * 1000000).round(),
       ),
     );
     final signal = pipeline.process(window: frames, context: context);

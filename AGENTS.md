@@ -144,12 +144,13 @@ When debugging test issues (like current tolerance problem), add prints in test 
 ## Immediate Next Steps
 
 1. ✅ Debug wavelet tolerance issue: Confirmed percentTolerance working correctly
-2. Integrate Predominant Pulse display properly in UI
-3. **Consensus algorithm improvements** (see `docs/CONSENSUS-ANALYSIS.md`):
-   - Priority 1: Enhanced harmonic normalization (handle 3/2, 2/3, 5/4, 4/5 harmonics)
-   - Priority 2: Adaptive cluster tolerance (percentage-based instead of fixed 3.0 BPM)
-   - Priority 5: Enhanced confidence metadata weighting
-4. Expand WAV fixture coverage beyond metronomes
+2. ✅ Consensus algorithm improvements: Implemented adaptive tolerance, harmonic normalization, enhanced weighting
+3. ✅ Autocorrelation improvements: Fixed harmonic confusion on metronomes
+4. ✅ FFT improvements: Enhanced peak weighting and fundamental guard
+5. ✅ Document beat tracking for future: See `docs/FUTURE-BEAT-TRACKING.md`
+6. ✅ UI improvements: Tempogram visualization implemented (see `docs/UI-IMPROVEMENTS.md`)
+7. **Next**: User testing on device, gather feedback
+8. Musical material note: Requires dynamic programming beat tracking (documented for future exploration)
 
 ## Recent Findings (2025-10-31)
 
@@ -164,7 +165,7 @@ When debugging test issues (like current tolerance problem), add prints in test 
 - **Root Cause**: Consensus only normalizes octaves (2×, 0.5×), misses common musical harmonics (3/2, 2/3, 5/4, etc.)
 - **Solution Path**: See comprehensive analysis in `docs/CONSENSUS-ANALYSIS.md`
 
-### Test Performance
-- **Metronomes**: 100% pass rate ✓
-- **Musical Material**: 0% consensus pass rate (algorithms disagree on harmonic families)
-- **Overall**: 74% pass rate (26/35 tests)
+### Test Performance (Updated 2025-10-31 17:30)
+- **Metronomes**: 100% pass rate ✓ (All 25 metronome tests passing)
+- **Musical Material**: 0% pass rate (algorithms disagree on harmonic families)
+- **Overall**: 77% pass rate (27/35 tests) - up from 74%

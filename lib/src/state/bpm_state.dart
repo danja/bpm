@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:equatable/equatable.dart';
 
 import 'package:bpm/src/models/bpm_models.dart';

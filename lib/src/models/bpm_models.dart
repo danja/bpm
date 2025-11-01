@@ -2,6 +2,22 @@ import 'dart:typed_data';
 
 import 'package:equatable/equatable.dart';
 
+enum DetectionStyle {
+  rockPop,
+  electronic,
+  techno,
+  classical,
+}
+
+extension DetectionStyleX on DetectionStyle {
+  String get label => switch (this) {
+        DetectionStyle.rockPop => 'Rock / Pop',
+        DetectionStyle.electronic => 'Electronic',
+        DetectionStyle.techno => 'Techno',
+        DetectionStyle.classical => 'Classical',
+      };
+}
+
 /// Operational status for BPM detection flow.
 enum DetectionStatus {
   idle,
@@ -138,7 +154,7 @@ class BpmSummary extends Equatable {
         status: DetectionStatus.idle,
         readings: [],
         previewSamples: [],
-        plpTrace: const <double>[],
+        plpTrace: <double>[],
       );
 }
 

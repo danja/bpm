@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:bpm/src/core/consensus_interface.dart';
 import 'package:bpm/src/models/bpm_models.dart';
+import 'package:meta/meta.dart';
 
 /// Robust consensus engine with per-algorithm tracking and majority voting.
 ///
@@ -18,7 +19,8 @@ class RobustConsensusEngine implements ConsensusInterface {
     this.minReadingsForOutlierDetection = 3,
     this.algorithmOutlierThreshold =
         8.0, // BPM deviation for per-algorithm outlier
-    this.clusterTolerancePercent = 0.05, // 5% of tempo for clustering (adaptive)
+    this.clusterTolerancePercent =
+        0.05, // 5% of tempo for clustering (adaptive)
     this.clusterToleranceMinBpm = 2.5, // Minimum absolute BPM tolerance
     this.minClusterSize = 2, // Minimum algorithms to form valid cluster
     this.smoothingFactor = 0.25,
@@ -37,6 +39,20 @@ class RobustConsensusEngine implements ConsensusInterface {
   final int consensusHistoryLimit;
   final double minBpm;
   final double maxBpm;
+
+  static const List<double> _harmonicPromotionRatios = [
+    2.0,
+    3.0,
+    1.5,
+    4.0 / 3.0,
+  ];
+  static const List<String> _harmonicSourceKeywords = [
+    'half',
+    'double',
+    'triple',
+    'multiplier',
+    'octave',
+  ];
 
   // Per-algorithm history: algorithmId -> queue of BPM values
   final _algorithmHistories = <String, Queue<double>>{};
@@ -80,7 +96,11 @@ class RobustConsensusEngine implements ConsensusInterface {
     }
 
     // Step 3: Select winning cluster (majority vote)
-    final winningCluster = _selectWinningCluster(clusters);
+    var winningCluster = _selectWinningCluster(clusters);
+    final override = _selectHarmonicOverride(winningCluster, cleanedReadings);
+    if (override != null) {
+      winningCluster = _Cluster(members: [override]);
+    }
     final totalWeightAll = cleanedReadings.fold<double>(
       0,
       (sum, reading) => sum + _readingWeight(reading),
@@ -149,6 +169,11 @@ class RobustConsensusEngine implements ConsensusInterface {
     _consensusHistory.clear();
   }
 
+  @visibleForTesting
+  List<BpmReading> debugNormalizeForTesting(List<BpmReading> readings) {
+    return _normalizeOctaveErrors(readings);
+  }
+
   /// Normalize harmonic errors against evolving reference (current consensus or median).
   /// Handles common musical harmonics: octaves, fifths, fourths, thirds.
   List<BpmReading> _normalizeOctaveErrors(List<BpmReading> readings) {
@@ -167,18 +192,18 @@ class RobustConsensusEngine implements ConsensusInterface {
 
     // Common musical harmonic ratios (sorted by musical importance)
     final harmonicRatios = [
-      1.0,   // Unison (no change)
-      2.0,   // Octave up
-      0.5,   // Octave down
-      1.5,   // Perfect fifth up (3/2)
+      1.0, // Unison (no change)
+      2.0, // Octave up
+      0.5, // Octave down
+      1.5, // Perfect fifth up (3/2)
       0.667, // Perfect fifth down (2/3)
       1.333, // Perfect fourth up (4/3)
-      0.75,  // Perfect fourth down (3/4)
-      1.25,  // Major third up (5/4)
-      0.8,   // Major third down (4/5)
-      1.2,   // Minor third up (6/5)
+      0.75, // Perfect fourth down (3/4)
+      1.25, // Major third up (5/4)
+      0.8, // Major third down (4/5)
+      1.2, // Minor third up (6/5)
       0.833, // Minor third down (5/6)
-      3.0,   // Two octaves up
+      3.0, // Two octaves up
       0.333, // Two octaves down
     ];
 
@@ -368,6 +393,101 @@ class RobustConsensusEngine implements ConsensusInterface {
     }
 
     return bestCluster;
+  }
+
+  BpmReading? _selectHarmonicOverride(
+    _Cluster winningCluster,
+    List<BpmReading> readings,
+  ) {
+    if (winningCluster.members.isEmpty) {
+      return null;
+    }
+
+    final clusterMean = _calculateClusterMean(winningCluster);
+    if (!clusterMean.isFinite || clusterMean <= 0 || clusterMean >= 90) {
+      return null;
+    }
+
+    final clusterAlgorithms =
+        winningCluster.members.map((reading) => reading.algorithmId).toSet();
+    final clusterConfidenceAvg = winningCluster.members.fold<double>(
+          0,
+          (sum, reading) => sum + reading.confidence.clamp(0.0, 1.0),
+        ) /
+        winningCluster.members.length;
+
+    var derivedCount = 0;
+    for (final member in winningCluster.members) {
+      final sources = member.metadata['sources'];
+      if (sources is Iterable &&
+          sources
+              .map((source) => source.toString())
+              .any((value) => _isDerivedSource(value))) {
+        derivedCount++;
+      }
+    }
+
+    for (final reading in readings) {
+      if (winningCluster.members.contains(reading)) {
+        continue;
+      }
+      if (clusterAlgorithms.contains(reading.algorithmId)) {
+        // Skip alternative reading from same algorithm to avoid oscillation
+        continue;
+      }
+
+      final ratio = reading.bpm / clusterMean;
+      final matchedRatio = _matchPromotionRatio(ratio);
+      if (matchedRatio == null || matchedRatio <= 1.0) {
+        continue;
+      }
+
+      if (reading.bpm <= clusterMean * 1.2) {
+        continue;
+      }
+
+      final confidence = reading.confidence.clamp(0.0, 1.0);
+      final consistency =
+          (reading.metadata['clusterConsistency'] as num?)?.toDouble() ?? 0.0;
+      final weight = _readingWeight(reading);
+      final guardApplied = reading.metadata['fundamentalGuardApplied'] == true;
+      final strongConfidence =
+          confidence >= 0.82 && (weight >= 0.35 || guardApplied);
+      final strongConsistency = consistency >= 0.55;
+
+      if (!strongConfidence || !strongConsistency) {
+        continue;
+      }
+
+      final clusterWeak = clusterConfidenceAvg < 0.5 ||
+          derivedCount >= math.max(1, winningCluster.members.length - 1);
+
+      if (guardApplied || clusterWeak) {
+        return reading;
+      }
+    }
+
+    return null;
+  }
+
+  double? _matchPromotionRatio(double ratio) {
+    for (final candidate in _harmonicPromotionRatios) {
+      final tolerance = candidate * 0.08;
+      if ((ratio - candidate).abs() <= tolerance) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  bool _isDerivedSource(String value) {
+    final lower = value.toLowerCase();
+    for (final keyword in _harmonicSourceKeywords) {
+      if (lower.contains(keyword)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   double _calculateClusterMean(_Cluster cluster) {
