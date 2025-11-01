@@ -298,11 +298,19 @@ class BpmDetectorCoordinator {
         if (plpStrengthTrace != null && plpStrengthTrace.isNotEmpty) {
           _latestPlpStrengthTrace = plpStrengthTrace;
         }
-        if (plpBpm != null && plpBpm > 0) {
-          _latestPlpBpm = plpBpm;
-        }
         if (plpStrength != null) {
           _latestPlpStrength = plpStrength.clamp(0.0, 1.0);
+        }
+        if (plpBpm != null && plpBpm > 0) {
+          final clampedPlp = plpBpm.clamp(context.minBpm, context.maxBpm);
+          final strength = (_latestPlpStrength ?? 0).clamp(0.0, 1.0);
+          final isEdge = (clampedPlp - context.minBpm).abs() < 1e-6 ||
+              (clampedPlp - context.maxBpm).abs() < 1e-6;
+          if (isEdge && strength < 0.25) {
+            _latestPlpBpm = null;
+          } else {
+            _latestPlpBpm = clampedPlp;
+          }
         }
 
         _logger.info(
@@ -332,7 +340,7 @@ class BpmDetectorCoordinator {
           final plpReading = BpmReading(
             algorithmId: 'plp_tempogram',
             algorithmName: 'Tempogram PLP',
-            bpm: _latestPlpBpm!.clamp(context.minBpm, context.maxBpm),
+            bpm: _latestPlpBpm!,
             confidence: plpConfidence,
             timestamp: DateTime.now().toUtc(),
             metadata: {
@@ -512,7 +520,7 @@ class BpmDetectorCoordinator {
             BpmReading(
               algorithmId: 'plp_tempogram',
               algorithmName: 'Tempogram PLP',
-              bpm: _latestPlpBpm!.clamp(context.minBpm, context.maxBpm),
+              bpm: _latestPlpBpm!,
               confidence: plpConfidence,
               timestamp: DateTime.now().toUtc(),
               metadata: {
