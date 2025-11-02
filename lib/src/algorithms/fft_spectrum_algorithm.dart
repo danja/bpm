@@ -134,6 +134,45 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       ]);
     }
 
+    for (final harmonic in _spectrumHarmonicCandidates) {
+      final targetBpm = bestBpm * harmonic.ratio;
+      if (!targetBpm.isFinite) {
+        continue;
+      }
+      if (targetBpm < signal.context.minBpm * 0.8 ||
+          targetBpm > signal.context.maxBpm * 1.25) {
+        continue;
+      }
+      final index = _indexForBpm(
+        bpm: targetBpm,
+        freqResolution: freqResolution,
+        minIndex: minIndex,
+        maxIndex: maxIndex,
+      );
+      if (index == null) {
+        continue;
+      }
+      final magnitude = spectrum.magnitudes[index];
+      var relative = magnitude / (bestMagnitude + 1e-6);
+      if (relative < harmonic.minRelativeStrength) {
+        if (harmonic.minRelativeStrength <= 0) {
+          continue;
+        }
+        relative = harmonic.minRelativeStrength;
+      }
+
+      final weight = (relative * harmonic.weightScale)
+          .clamp(0.05, harmonic.maxWeight);
+      neighbors.add(
+        TempoCandidate(
+          bpm: targetBpm,
+          weight: weight,
+          source: harmonic.label,
+          allowHarmonics: false,
+        ),
+      );
+    }
+
     // Add nearby spectral bins as candidates for clustering
     // Only add if they're significant (>50% of peak magnitude)
     for (var offset = 1; offset <= 2; offset++) {
@@ -164,6 +203,62 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       }
     }
 
+    double? harmonicOverrideBpm;
+    double harmonicOverrideScore = 0.0;
+    final peakCandidate = neighbors
+        .firstWhere((candidate) => candidate.source == 'peak', orElse: () => const TempoCandidate(bpm: 0, weight: 0));
+    final double peakWeight = peakCandidate.weight > 0 ? peakCandidate.weight : 1.0;
+    const overrideSources = {'peak_six_fifths', 'peak_five_fourths', 'peak_four_thirds'};
+    for (final candidate in neighbors) {
+      if (!overrideSources.contains(candidate.source)) {
+        continue;
+      }
+      if (!candidate.bpm.isFinite) {
+        continue;
+      }
+      final normalizedWeight = (candidate.weight / peakWeight).clamp(0.0, 1.0);
+      if (normalizedWeight < 0.22) {
+        continue;
+      }
+      final adjusted = AlgorithmUtils.coerceToRange(
+        candidate.bpm,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+      if (adjusted == null) {
+        continue;
+      }
+      if (harmonicOverrideBpm == null || normalizedWeight > harmonicOverrideScore) {
+        harmonicOverrideBpm = adjusted.bpm;
+        harmonicOverrideScore = normalizedWeight;
+      }
+    }
+
+    if (harmonicOverrideBpm == null) {
+      const fallbackRatios = [4 / 3, 6 / 5, 5 / 4];
+      for (final ratio in fallbackRatios) {
+        final candidateBpm = bestBpm * ratio;
+        if (!candidateBpm.isFinite) {
+          continue;
+        }
+        if (candidateBpm < signal.context.minBpm ||
+            candidateBpm > signal.context.maxBpm) {
+          continue;
+        }
+        final adjusted = AlgorithmUtils.coerceToRange(
+          candidateBpm,
+          minBpm: signal.context.minBpm,
+          maxBpm: signal.context.maxBpm,
+        );
+        if (adjusted == null) {
+          continue;
+        }
+        harmonicOverrideBpm = adjusted.bpm;
+        harmonicOverrideScore = 0.18;
+        break;
+      }
+    }
+
     final refinement = AlgorithmUtils.refineFromCandidates(
       candidates: neighbors,
       minBpm: signal.context.minBpm,
@@ -188,17 +283,46 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     }
     double bpm;
     bool fundamentalGuardApplied = false;
+    bool harmonicOverrideApplied = false;
+    var allowHarmonicShift = false;
+    var avgMultiplier = 1.0;
+
     if (refinement != null) {
       bpm = refinement.bpm;
-      final avgMultiplier = refinement.averageMultiplier.abs();
-      // More aggressive fundamental guard - apply if multiplier deviates >15% (was 25%)
-      // This prevents harmonic candidates from winning
-      if ((avgMultiplier - 1.0).abs() > 0.15 && peakAdjustment != null) {
-        bpm = peakAdjustment.bpm;
-        fundamentalGuardApplied = true;
+      avgMultiplier = refinement.averageMultiplier.abs();
+      final sources = refinement.metadata['sources'];
+      if (sources is Iterable) {
+        final lowerSources = sources.map((value) => value.toString());
+        allowHarmonicShift = lowerSources.any(
+          (value) =>
+              value.contains('peak_five_fourths') ||
+              value.contains('peak_six_fifths') ||
+              value.contains('peak_four_thirds'),
+        );
       }
     } else {
       bpm = fallbackAdjustment!.bpm;
+    }
+
+    if (harmonicOverrideBpm != null &&
+        (refinement == null ||
+            (peakAdjustment != null &&
+                (refinement.bpm - peakAdjustment.bpm).abs() < 0.6))) {
+      bpm = harmonicOverrideBpm!;
+      harmonicOverrideApplied = true;
+      allowHarmonicShift = true;
+      if (peakAdjustment != null && peakAdjustment.bpm > 0) {
+        avgMultiplier = (bpm / peakAdjustment.bpm).abs();
+      }
+    }
+
+    final guardThreshold = allowHarmonicShift ? 0.24 : 0.15;
+    if (!harmonicOverrideApplied &&
+        refinement != null &&
+        (avgMultiplier - 1.0).abs() > guardThreshold &&
+        peakAdjustment != null) {
+      bpm = peakAdjustment.bpm;
+      fundamentalGuardApplied = true;
     }
 
     var penalty = refinement != null
@@ -222,6 +346,11 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       'rawBestBpm': bestBpm,
       'clusterConsistency': penalty,
     };
+
+    if (harmonicOverrideApplied) {
+      metadata['harmonicOverrideApplied'] = true;
+      metadata['harmonicOverrideScore'] = harmonicOverrideScore;
+    }
 
     if (refinement != null) {
       metadata.addAll(refinement.metadata);
@@ -301,4 +430,85 @@ List<double> _energyEnvelope(List<double> samples) {
 
   final withoutDc = SignalUtils.removeMean(envelope);
   return SignalUtils.normalize(withoutDc);
+}
+
+class _SpectrumHarmonic {
+  const _SpectrumHarmonic({
+    required this.ratio,
+    required this.weightScale,
+    required this.label,
+    this.minRelativeStrength = 0.28,
+    this.maxWeight = 0.9,
+  });
+
+  final double ratio;
+  final double weightScale;
+  final String label;
+  final double minRelativeStrength;
+  final double maxWeight;
+}
+
+const List<_SpectrumHarmonic> _spectrumHarmonicCandidates = [
+  _SpectrumHarmonic(
+    ratio: 4 / 3,
+    weightScale: 0.7,
+    label: 'peak_four_thirds',
+    minRelativeStrength: 0.24,
+  ),
+  _SpectrumHarmonic(
+    ratio: 3 / 2,
+    weightScale: 0.65,
+    label: 'peak_three_halves',
+    minRelativeStrength: 0.22,
+  ),
+  _SpectrumHarmonic(
+    ratio: 5 / 4,
+    weightScale: 0.6,
+    label: 'peak_five_fourths',
+    minRelativeStrength: 0.25,
+  ),
+  _SpectrumHarmonic(
+    ratio: 6 / 5,
+    weightScale: 0.8,
+    label: 'peak_six_fifths',
+    minRelativeStrength: 0.05,
+    maxWeight: 1.0,
+  ),
+  _SpectrumHarmonic(
+    ratio: 4 / 5,
+    weightScale: 0.55,
+    label: 'peak_four_fifths',
+    minRelativeStrength: 0.26,
+    maxWeight: 0.75,
+  ),
+  _SpectrumHarmonic(
+    ratio: 3 / 4,
+    weightScale: 0.5,
+    label: 'peak_three_fourths',
+    minRelativeStrength: 0.26,
+    maxWeight: 0.7,
+  ),
+  _SpectrumHarmonic(
+    ratio: 2 / 3,
+    weightScale: 0.55,
+    label: 'peak_two_thirds',
+    minRelativeStrength: 0.25,
+    maxWeight: 0.75,
+  ),
+];
+
+int? _indexForBpm({
+  required double bpm,
+  required double freqResolution,
+  required int minIndex,
+  required int maxIndex,
+}) {
+  if (bpm <= 0) {
+    return null;
+  }
+  final index = (bpm / 60 / freqResolution).round();
+  if (index < minIndex || index > maxIndex) {
+    return null;
+  }
+  return index;
 }

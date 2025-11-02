@@ -103,6 +103,7 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
         selection.interval <= 0 ? effectiveInterval : selection.interval;
     final sources = List<String>.from(selection.sources);
     var adjustedToMedian = false;
+    double? histogramPreferenceMultiplier;
 
     if (medianInterval > 0 && selection.normalizedInterval > 0) {
       final ratio = medianInterval / selection.normalizedInterval;
@@ -113,6 +114,20 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
           sources.add('median_interval');
         }
         adjustedToMedian = true;
+      }
+    }
+
+    final preferredInterval = _preferFasterHistogramInterval(
+      selection,
+      effectiveInterval,
+    );
+    if (preferredInterval != null &&
+        (preferredInterval - effectiveInterval).abs() > 1e-4) {
+      histogramPreferenceMultiplier =
+          preferredInterval / (effectiveInterval == 0 ? 1 : effectiveInterval);
+      effectiveInterval = preferredInterval;
+      if (!sources.contains('histogram_fast_preference')) {
+        sources.add('histogram_fast_preference');
       }
     }
 
@@ -140,8 +155,12 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
 
     final rangeMultiplier =
         originalInterval == 0 ? 1.0 : effectiveInterval / originalInterval;
-    final rangeClamped =
+    var rangeClamped =
         rangeAdjusted || (rangeAdjustment?.clamped ?? false) || rangeMultiplier.abs() > 1.05;
+    var adjustedRangeMultiplier = rangeMultiplier;
+    if (histogramPreferenceMultiplier != null) {
+      adjustedRangeMultiplier *= histogramPreferenceMultiplier.abs();
+    }
 
     // Calculate variance of intervals (now in seconds)
     final variance = _variance(trimmedIntervals, effectiveInterval);
@@ -170,13 +189,18 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       'totalScore': selection.totalScore,
       'baseBpm': 60.0 / selection.interval,
       'supporterCount': selection.supporters,
-      'rangeMultiplier': rangeMultiplier,
+      'rangeMultiplier': adjustedRangeMultiplier,
       'rangeClamped': rangeClamped,
       'sources': sources,
       'suppressedBuckets': selection.suppressedBpms,
       'medianAdjustment': adjustedToMedian,
       'rangeAdjustment': rangeAdjusted,
     };
+    if (histogramPreferenceMultiplier != null) {
+      metadata['histogramPreferenceMultiplier'] =
+          histogramPreferenceMultiplier;
+      metadata['histogramPreferenceApplied'] = true;
+    }
 
     return BpmReading(
       algorithmId: id,
@@ -399,7 +423,7 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       );
       histogram.accumulate(
         interval: interval * 3,
-        weight: baseWeight * 0.1,
+        weight: baseWeight * 0.05,
         supporters: 0,
         source: 'triple_interval',
       );
@@ -409,6 +433,26 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
         supporters: 0,
         source: 'half_interval',
       );
+
+      for (final adjustment in _onsetHarmonicAdjustments) {
+        final scaledInterval = interval * adjustment.scale;
+        if (scaledInterval <= 0) {
+          continue;
+        }
+        final scaledBpm = 60.0 / scaledInterval;
+        if (scaledBpm.isNaN ||
+            scaledBpm.isInfinite ||
+            scaledBpm < context.minBpm * 0.8 ||
+            scaledBpm > context.maxBpm * 1.25) {
+          continue;
+        }
+        histogram.accumulate(
+          interval: scaledInterval,
+          weight: baseWeight * adjustment.weight,
+          supporters: 0,
+          source: adjustment.label,
+        );
+      }
     }
 
     final refinement = AlgorithmUtils.refineFromIntervals(
@@ -429,7 +473,129 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
 
     histogram.applyLengthBoost();
     histogram.suppressShorterHarmonics(minShare: 0.22);
+    histogram.suppressLongerHarmonics(minShare: 0.24);
 
     return histogram.select();
   }
 }
+
+class _IntervalAdjustment {
+  const _IntervalAdjustment({
+    required this.scale,
+    required this.weight,
+    required this.label,
+  });
+
+  final double scale;
+  final double weight;
+  final String label;
+}
+
+double? _preferFasterHistogramInterval(
+  HistogramSelection selection,
+  double currentInterval,
+) {
+  if (currentInterval <= 0) {
+    return null;
+  }
+  final currentBpm = 60.0 / currentInterval;
+  final currentScore =
+          _histogramScoreForBpm(selection, currentBpm) ?? selection.score;
+  var bestBpm = currentBpm;
+  var bestScoreRatio = 0.0;
+  var found = false;
+
+  selection.scoreMap.forEach((candidateBpm, score) {
+    if (candidateBpm <= currentBpm) {
+      return;
+    }
+    final ratio = candidateBpm / currentBpm;
+    if (ratio < 1.04 || ratio > 1.28) {
+      return;
+    }
+    final relative = currentScore == 0 ? 0.0 : score / currentScore;
+    final absolute =
+        selection.totalScore == 0 ? 0.0 : score / selection.totalScore;
+    if (relative < 0.05 && absolute < 0.05) {
+      return;
+    }
+    final ratioAffinity =
+        (1.0 - ((ratio - 1.0).abs() / 0.18)).clamp(0.0, 1.0);
+    final scoreRatio =
+        relative * 0.5 + absolute * 0.2 + ratioAffinity * 0.3;
+    if (!found ||
+        scoreRatio > bestScoreRatio + 1e-6 ||
+        ((scoreRatio - bestScoreRatio).abs() <= 1e-6 &&
+            (candidateBpm - currentBpm) < (bestBpm - currentBpm))) {
+      found = true;
+      bestScoreRatio = scoreRatio;
+      bestBpm = candidateBpm;
+    }
+  });
+
+  if (!found || (bestBpm - currentBpm).abs() < 0.25) {
+    return null;
+  }
+  return 60.0 / bestBpm;
+}
+
+double? _histogramScoreForBpm(HistogramSelection selection, double bpm) {
+  double? bestScore;
+  var bestDiff = double.infinity;
+  selection.scoreMap.forEach((candidateBpm, score) {
+    final diff = (candidateBpm - bpm).abs();
+    if (diff < bestDiff && diff <= 1.5) {
+      bestScore = score;
+      bestDiff = diff;
+    }
+  });
+  return bestScore;
+}
+
+const List<_IntervalAdjustment> _onsetHarmonicAdjustments = [
+  _IntervalAdjustment(
+    scale: 2 / 3,
+    weight: 0.07,
+    label: 'interval_two_thirds',
+  ),
+  _IntervalAdjustment(
+    scale: 0.75,
+    weight: 0.06,
+    label: 'interval_three_fourths',
+  ),
+  _IntervalAdjustment(
+    scale: 0.8,
+    weight: 0.055,
+    label: 'interval_four_fifths',
+  ),
+  _IntervalAdjustment(
+    scale: 7 / 8,
+    weight: 0.6,
+    label: 'interval_seven_eighths',
+  ),
+  _IntervalAdjustment(
+    scale: 15 / 16,
+    weight: 0.55,
+    label: 'interval_fifteen_sixteenths',
+  ),
+  _IntervalAdjustment(
+    scale: 6 / 7,
+    weight: 0.48,
+    label: 'interval_six_sevenths',
+  ),
+  _IntervalAdjustment(
+    scale: 4 / 3,
+    weight: 0.045,
+    label: 'interval_four_thirds',
+  ),
+  _IntervalAdjustment(
+    scale: 5 / 4,
+    weight: 0.04,
+    label: 'interval_five_fourths',
+  ),
+  _IntervalAdjustment(
+    scale: 3 / 2,
+    weight: 0.035,
+    label: 'interval_three_halves',
+  ),
+];

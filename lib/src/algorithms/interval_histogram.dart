@@ -48,7 +48,8 @@ class IntervalHistogram {
     }
     for (final bucket in _buckets.values) {
       final lengthRatio = (bucket.interval / _longestInterval).clamp(0.3, 1.0);
-      bucket.applyBoost(lengthRatio * lengthRatio * lengthRatio);
+      final multiplier = 0.75 + 0.25 * lengthRatio;
+      bucket.applyBoost(multiplier);
     }
   }
 
@@ -96,6 +97,76 @@ class IntervalHistogram {
             shouldSuppress = true;
             break;
           }
+        }
+      }
+
+      if (shouldSuppress) {
+        bucket.suppress(suppressionFactor);
+      }
+    }
+  }
+
+  /// Suppresses longer harmonic buckets when shorter fundamentals dominate.
+  void suppressLongerHarmonics({
+    double minShare = 0.2,
+    double suppressionFactor = 0.25,
+  }) {
+    final totalScore = _totalScore();
+    if (totalScore <= 0) {
+      return;
+    }
+
+    for (final bucket in _buckets.values) {
+      if (bucket.suppressed) {
+        continue;
+      }
+
+      var shouldSuppress = false;
+      final shorterTargets = <double>[
+        bucket.interval / 2,
+        bucket.interval / 3,
+        bucket.interval / 1.5,
+        bucket.interval / (4 / 3),
+        bucket.interval / (5 / 4),
+      ];
+
+      for (final target in shorterTargets) {
+        if (target <= 0) continue;
+        final shorter = _findNearest(target);
+        if (shorter == null ||
+            shorter.interval >= bucket.interval ||
+            shorter.suppressed) {
+          continue;
+        }
+
+        final ratio = bucket.interval / shorter.interval;
+        final nearDouble = ratio >= 1.9 && ratio <= 2.1;
+        final nearTriple = ratio >= 2.8 && ratio <= 3.2;
+        final nearFifth = ratio >= 1.45 && ratio <= 1.7;
+        final nearFourth = ratio >= 1.3 && ratio <= 1.4;
+        final nearSixth = ratio >= 1.6 && ratio <= 1.7;
+
+        if (!(nearDouble || nearTriple || nearFifth || nearFourth || nearSixth)) {
+          continue;
+        }
+
+        final share = shorter.score / totalScore;
+        var threshold = minShare;
+        if (nearDouble) threshold *= 0.75;
+        if (nearTriple) threshold *= 0.9;
+
+        // Harmonics near musical fifths/fourths require stronger evidence before suppressing.
+        final bool nearMusicalHarmonic = nearFifth || nearFourth || nearSixth;
+        if (nearMusicalHarmonic) {
+          threshold *= 1.35;
+        }
+
+        final relativeStrength = shorter.score / (bucket.score + 1e-9);
+        final relativeThreshold = nearMusicalHarmonic ? 0.68 : 0.55;
+
+        if (share >= threshold && relativeStrength >= relativeThreshold) {
+          shouldSuppress = true;
+          break;
         }
       }
 

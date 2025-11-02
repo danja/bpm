@@ -37,6 +37,20 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         : signal.filteredSamples;
     var samples = List<double>.from(baseSamples);
 
+    double? plpAnchorBpm;
+    if (signal.dominantTempoCurve.isNotEmpty) {
+      final anchorCandidates = <double>[];
+      for (final value in signal.dominantTempoCurve) {
+        if (value > 0) {
+          anchorCandidates.add(value.toDouble());
+        }
+      }
+      if (anchorCandidates.isNotEmpty) {
+        anchorCandidates.sort();
+        plpAnchorBpm = anchorCandidates[anchorCandidates.length ~/ 2];
+      }
+    }
+
     final contextSampleRate = signal.context.sampleRate.toDouble();
     final durationSeconds = signal.duration.inMicroseconds > 0
         ? signal.duration.inMicroseconds / 1e6
@@ -244,7 +258,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     final candidates = <TempoCandidate>[
       TempoCandidate(
         bpm: resolvedBpm,
-        weight: 1.0,
+        weight: 0.85,
         source: 'resolved',
         allowHarmonics: false,
       ),
@@ -288,6 +302,44 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       }
     }
 
+    final harmonicBoosts = <TempoCandidate>[];
+    const harmonicRatios = [
+      {'ratio': 1.5, 'weight': 0.9, 'label': 'x3-2'},
+      {'ratio': 4 / 3, 'weight': 0.85, 'label': 'x4-3'},
+      {'ratio': 5 / 4, 'weight': 0.82, 'label': 'x5-4'},
+      {'ratio': 4 / 5, 'weight': 0.78, 'label': 'x4-5'},
+      {'ratio': 3 / 4, 'weight': 0.74, 'label': 'x3-4'},
+      {'ratio': 2 / 3, 'weight': 0.76, 'label': 'x2-3'},
+      {'ratio': 2.0, 'weight': 0.3, 'label': 'x2'},
+      {'ratio': 3.0, 'weight': 0.95, 'label': 'x3'},
+    ];
+    for (final candidate in candidates) {
+      if (!candidate.allowHarmonics) {
+        for (final entry in harmonicRatios) {
+          final ratio = (entry['ratio'] as num).toDouble();
+          final expanded = candidate.bpm * ratio;
+          if (!expanded.isFinite) continue;
+          if (expanded < signal.context.minBpm * 0.85 ||
+              expanded > signal.context.maxBpm * 1.2) {
+            continue;
+          }
+          final weightScale = (entry['weight'] as num).toDouble();
+          harmonicBoosts.add(
+            TempoCandidate(
+              bpm: expanded,
+              weight: candidate.weight * weightScale,
+              source:
+                  '${candidate.source ?? 'candidate'}_${entry['label']}',
+              allowHarmonics: false,
+            ),
+          );
+        }
+      }
+    }
+    if (harmonicBoosts.isNotEmpty) {
+      candidates.addAll(harmonicBoosts);
+    }
+
     final refinement = AlgorithmUtils.refineFromCandidates(
       candidates: candidates,
       minBpm: signal.context.minBpm,
@@ -306,7 +358,30 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       }
     }
 
-    final bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
+    var bpm = refinement?.bpm ?? fallbackAdjustment!.bpm;
+
+    var rangeMultiplier = 1.0;
+    var rangeClamped = false;
+    if (refinement != null) {
+      rangeMultiplier = refinement.averageMultiplier;
+      rangeClamped = refinement.clampedCount > 0;
+    } else if (fallbackAdjustment != null) {
+      rangeMultiplier = fallbackAdjustment.multiplier;
+      rangeClamped = fallbackAdjustment.clamped;
+    }
+
+    final coerced = AlgorithmUtils.coerceToRange(
+      bpm,
+      minBpm: signal.context.minBpm,
+      maxBpm: signal.context.maxBpm,
+    );
+    if (coerced != null) {
+      if ((coerced.multiplier - 1.0).abs() > 0.05 || coerced.clamped) {
+        bpm = coerced.bpm;
+      }
+      rangeMultiplier *= coerced.multiplier;
+      rangeClamped = rangeClamped || coerced.clamped;
+    }
 
     final harmonicPenalty = refinement != null
         ? refinement.consistency
@@ -327,8 +402,75 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       aggregateStrength * 2.0
     ].reduce(max).clamp(0.0, 1.0);
 
-    final confidence =
+    var confidence =
         (0.55 * envelopeStrength + 0.45 * harmonicPenalty).clamp(0.0, 1.0);
+    var plpNormalized = false;
+    if (plpAnchorBpm != null && plpAnchorBpm > 0) {
+      final normalized = AlgorithmUtils.normalizeToReference(
+        bpm,
+        plpAnchorBpm,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+      if ((normalized - plpAnchorBpm).abs() < (bpm - plpAnchorBpm).abs() - 1e-6) {
+        bpm = normalized;
+        plpNormalized = true;
+      }
+    }
+    final originalBpm = bpm;
+    var harmonicOverrideApplied = false;
+    double? harmonicOverrideRatio;
+    if (bpm > signal.context.minBpm * 1.1) {
+      double bestWeight = 0;
+      double? candidateBpmOverride;
+      for (final candidate in candidates) {
+        if (!candidate.bpm.isFinite || candidate.weight <= 0) {
+          continue;
+        }
+        if (candidate.bpm >= bpm) {
+          continue;
+        }
+        final ratio = candidate.bpm / bpm;
+        if (ratio < 0.75 || ratio > 0.92) {
+          continue;
+        }
+        if (candidate.weight > bestWeight + 1e-6) {
+          bestWeight = candidate.weight;
+          candidateBpmOverride = candidate.bpm;
+        }
+      }
+      if (candidateBpmOverride != null &&
+          (bpm - candidateBpmOverride).abs() > 2.5) {
+        bpm = candidateBpmOverride;
+        confidence *= 0.95;
+        harmonicOverrideApplied = true;
+        harmonicOverrideRatio = bpm / originalBpm;
+      }
+    }
+    if (plpAnchorBpm != null && plpAnchorBpm > 0) {
+      final preAnchorBpm = originalBpm;
+      var bestDiff = (bpm - plpAnchorBpm).abs();
+      var bestBpm = bpm;
+      const expansionRatios = [6 / 5, 5 / 4, 4 / 3];
+      for (final ratio in expansionRatios) {
+        final candidate = (preAnchorBpm * ratio).clamp(
+          signal.context.minBpm,
+          signal.context.maxBpm,
+        );
+        final diff = (candidate - plpAnchorBpm).abs();
+        if (diff + 1e-6 < bestDiff && (candidate - bpm).abs() > 1.5) {
+          bestDiff = diff;
+          bestBpm = candidate;
+          harmonicOverrideRatio = ratio;
+        }
+      }
+      if ((bestBpm - bpm).abs() > 1.5 &&
+          bestDiff < (bpm - plpAnchorBpm).abs() - 1e-6) {
+        bpm = bestBpm;
+        confidence *= 0.95;
+        harmonicOverrideApplied = true;
+      }
+    }
     final metadata = <String, Object?>{
       'lagSamples': finalLagSamples,
       'level': usedAggregate ? -1 : bestLevel,
@@ -341,12 +483,18 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       'clusterConsistency': harmonicPenalty,
       if (diagnostics.isNotEmpty) 'candidates': diagnostics,
       'finalScore': finalScore,
+      if (plpAnchorBpm != null) 'plpAnchorBpm': plpAnchorBpm,
+      if (plpNormalized) 'plpNormalized': true,
+      'baseResolvedBpm': originalBpm,
+      if (harmonicOverrideApplied) 'harmonicOverrideApplied': true,
+      if (harmonicOverrideRatio != null)
+        'harmonicOverrideRatio': harmonicOverrideRatio,
     };
 
     if (refinement != null) {
       metadata.addAll(refinement.metadata);
-      metadata['rangeMultiplier'] = refinement.averageMultiplier;
-      metadata['rangeClamped'] = refinement.clampedCount > 0;
+      metadata['rangeMultiplier'] = rangeMultiplier;
+      metadata['rangeClamped'] = rangeClamped;
     } else {
       metadata['clusterWeight'] = 0.0;
       metadata['clusterStd'] = 0.0;
@@ -355,11 +503,16 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
           (fallbackAdjustment!.multiplier - 1.0).abs();
       metadata['clampedContributors'] = fallbackAdjustment.clamped ? 1 : 0;
       metadata['sources'] = const <String>['fallback'];
-      metadata['rangeMultiplier'] = fallbackAdjustment.multiplier;
-      metadata['rangeClamped'] = fallbackAdjustment.clamped;
+      metadata['rangeMultiplier'] = rangeMultiplier;
+      metadata['rangeClamped'] = rangeClamped;
     }
 
     metadata['clusterConsistency'] ??= harmonicPenalty;
+    if (coerced != null &&
+        (coerced.multiplier - 1.0).abs() > 0.05 &&
+        !metadata.containsKey('harmonicAdjusted')) {
+      metadata['harmonicAdjusted'] = coerced.multiplier;
+    }
 
     return BpmReading(
       algorithmId: id,

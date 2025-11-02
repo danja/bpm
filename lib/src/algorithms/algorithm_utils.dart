@@ -90,8 +90,13 @@ class AlgorithmUtils {
       1 / 4,
       1 / 3,
       0.5,
+      5 / 6,
+      4 / 5,
+      3 / 4,
       2 / 3,
       1.0,
+      5 / 4,
+      6 / 5,
       1.5,
       2.0,
       3.0,
@@ -106,7 +111,7 @@ class AlgorithmUtils {
       }
       final diff = (candidate - reference).abs();
       final harmonicPenalty = math.max(0.0, (factor - 1.0).abs() - 0.1);
-      final score = diff + harmonicPenalty * 2;
+      final score = diff + harmonicPenalty * 4;
       if (best == null || score < best.score) {
         best = _Candidate(
           bpm: candidate,

@@ -5,8 +5,8 @@ This document summarizes the signal-processing approaches currently implemented 
 ## Layered Overview
 
 1. **Audio Capture & Preprocessing** — `RecordAudioStreamSource` pulls mono float frames from the microphone, normalizes them, and hands them to the coordinator in fixed windows (`AudioStreamConfig`).
-2. **Algorithm Registry** — `AlgorithmRegistry` fans each sliding window into multiple detection strategies (`SimpleOnsetAlgorithm`, `AutocorrelationAlgorithm`, `FftSpectrumAlgorithm`, `WaveletEnergyAlgorithm`). Each implementation owns its preferred window size and emits a `BpmReading`.
-3. **Consensus Engine** — `ConsensusEngine` weights algorithm outputs by confidence and recency before surfacing a single `ConsensusResult`. This keeps the UI stable even if any one method momentarily misfires.
+2. **Algorithm Registry** — `AlgorithmRegistry` fans each sliding window into multiple detection strategies (`SimpleOnsetAlgorithm`, `AutocorrelationAlgorithm`, `FftSpectrumAlgorithm`, `WaveletEnergyAlgorithm`, `DynamicProgrammingBeatTracker`). Each implementation owns its preferred window size and emits a `BpmReading`.
+3. **Consensus Engine** — `ConsensusEngine` weights algorithm outputs by confidence and recency before surfacing a single `ConsensusResult`. This keeps the UI stable even if any one method momentarily misfires, while the coordinator can emphasise different detectors (e.g. the DP tracker) based on genre presets.
 
 ## Energy Onset (Transient) Detection
 
@@ -53,6 +53,20 @@ This document summarizes the signal-processing approaches currently implemented 
   - A. Klapuri et al., *“Multipitch Analysis of Harmonic Sound Signals Based on Spectral Flattening and Subharmonic Summation,”* IEEE TASLP 11(6), 2003 — foundational for harmonic sum approaches.
 
 **Usage Notes**: Works well on steady-state dance tracks. Ensure `fftSize` spans at least 8–12 seconds to get sub-1 BPM resolution when targeting low tempos; the guard keeps consensus aligned with the fundamental even when harmonic peaks dominate.
+
+## Dynamic Programming Beat Tracker
+
+- **Implementation**: `lib/src/algorithms/dynamic_programming_beat_tracker.dart`
+- **Idea**: Uses dynamic programming to trace a globally consistent sequence of beat times directly on the onset envelope. Rather than searching for a single periodicity peak, it maximises onset energy while penalising sudden tempo jumps, which lets it follow expressive tempo changes (rubato, rallentando) that confuse purely periodic methods.
+- **Key Steps**:
+  - Consume the precomputed onset envelope (≈100 Hz) and build a tempo grid derived from the current `DetectionContext`.
+  - Fill a DP lattice where each state represents “best score ending at frame *t* with tempo bin *τ*”, accumulating onset energy and subtracting `λ × |τ−τ'|` tempo-change costs.
+  - Backtrack the optimal path, discard implausible beat intervals, and estimate BPM via a trimmed mean of the remaining spacings. Metadata captures beat times, interval statistics, energy ratios, and smoothness so downstream layers can inspect confidence.
+- **References**:
+  - D. P. W. Ellis, *“Beat Tracking by Dynamic Programming,”* ISMIR 2007.
+  - M. E. P. Davies & M. D. Plumbley, *“Context-Dependent Beat Tracking of Musical Audio,”* IEEE TASLP 15(3), 2007.
+
+**Usage Notes**: Enabled alongside the periodic detectors. Its confidence hinges on the onset envelope’s signal-to-noise ratio and the smoothness of the recovered beat path; consensus down-weights it when the path becomes erratic. Future genre presets can preferentially weight the tracker for classical material while leaving the steady-tempo experience unchanged.
 
 ## Wavelet Energy Bands + Aggregation
 

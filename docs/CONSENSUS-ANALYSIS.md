@@ -214,6 +214,8 @@ Cluster candidate fundamentals:
 
 Winner: ~113 BPM cluster
 Consensus: mean(115.38, 109.75, 111.89) = 112.3 BPM ✓
+
+🚧 **Current status**: The Ellis-style dynamic programming beat tracker now supplements the periodic algorithms and already surfaces plausible beat paths for expressive material. Consensus still treats it as a peer reading; once multi-reference clustering is in place the DP track can seed the fundamental cluster instead of fighting harmonic estimates.
 ```
 
 ### Priority 4: Algorithm Reliability Scoring
@@ -269,13 +271,22 @@ final complexity = _estimateSignalComplexity(signal);
    - Test on all fixtures, measure improvement
 
 3. **Week 3** (Medium Impact, High Complexity):
-   - ⚠ Priority 3: Multi-reference clustering (6-8 hours)
-   - Advanced algorithm, needs careful testing
+   - ⚠ Priority 3: Multi-reference clustering (6-8 hours) — still pending.
+   - Investigate fusing DP beat tracker outputs as an additional reference cluster for expressive material.
 
 4. **Week 4** (Refinement):
-   - Priority 4: Algorithm reliability scoring
+   - Priority 4: Algorithm reliability scoring (per-genre weighting) — plan to leverage the upcoming style presets.
    - Performance profiling and optimization
-   - Documentation updates
+   - Documentation updates (DP tracker integration, preset mappings)
+
+### Style Preset Roadmap
+
+- **Rock / Pop (default)**: retain the current weighting (periodicity dominant, DP tracker low influence) for steady backbeats.
+- **Electronic / Techno**: emphasise FFT + onset, keep strong harmonic suppression, ignore DP unless confidence is very high.
+- **Classical**: boost DP tracker and PLP confidence, relax harmonic penalties, broaden consensus tolerance.
+- **Other / Speech**: down-weight all BPM estimates unless confidence crosses a high threshold, preventing spurious readings.
+
+Presets will simply tweak consensus weights/penalties; no algorithm code needs to fork. They offer a safe opt-in path for users without destabilising the default behaviour.
 
 ---
 
