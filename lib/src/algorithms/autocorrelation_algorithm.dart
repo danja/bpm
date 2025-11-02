@@ -341,10 +341,8 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
         histogramPreferenceMultiplier =
             (histogramPreferenceMultiplier ?? 1.0) * multiplier.abs();
         bpm = secondaryCandidate;
-        if (histogramPreferenceMultiplier != null &&
-            histogramPreferenceMultiplier < 0) {
-          histogramPreferenceMultiplier =
-              histogramPreferenceMultiplier!.abs();
+        if (histogramPreferenceMultiplier < 0) {
+          histogramPreferenceMultiplier = histogramPreferenceMultiplier.abs();
         }
         histogramSecondaryApplied = true;
       }

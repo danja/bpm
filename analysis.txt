@@ -1,0 +1,27 @@
+Analyzing bpm...                                                
+
+warning • The operand can't be 'null', so the condition is always 'true' • lib/src/algorithms/autocorrelation_algorithm.dart:344:43 • unnecessary_null_comparison
+warning • The '!' will have no effect because the receiver can't be null • lib/src/algorithms/autocorrelation_algorithm.dart:347:44 • unnecessary_non_null_assertion
+warning • The '!' will have no effect because the receiver can't be null • lib/src/algorithms/fft_spectrum_algorithm.dart:311:32 • unnecessary_non_null_assertion
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/screens/home_screen.dart:172:45 • deprecated_member_use
+warning • The value of the local variable 'textTheme' isn't used • lib/src/ui/widgets/bpm_summary_card.dart:77:11 • unused_local_variable
+warning • The value of the local variable 'colorScheme' isn't used • lib/src/ui/widgets/bpm_summary_card.dart:78:11 • unused_local_variable
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:34:40 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:45:53 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:53:55 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:68:38 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:84:48 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:259:36 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:265:37 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/ui/widgets/tempogram_visualizer.dart:293:39 • deprecated_member_use
+   info • Don't invoke 'print' in production code • tool/debug_consensus.dart:40:3 • avoid_print
+   info • Don't invoke 'print' in production code • tool/debug_consensus.dart:41:3 • avoid_print
+   info • Don't invoke 'print' in production code • tool/debug_consensus.dart:44:7 • avoid_print
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:53:3 • avoid_print
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:57:5 • avoid_print
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:60:7 • avoid_print
+warning • The member 'debugNormalizeForTesting' can only be used within 'package:bpm/src/core/robust_consensus_engine.dart' or a test • tool/inspect_fixture.dart:66:38 • invalid_use_of_visible_for_testing_member
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:68:5 • avoid_print
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:73:3 • avoid_print
+   info • Don't invoke 'print' in production code • tool/inspect_fixture.dart:75:5 • avoid_print
+

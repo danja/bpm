@@ -308,7 +308,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
         (refinement == null ||
             (peakAdjustment != null &&
                 (refinement.bpm - peakAdjustment.bpm).abs() < 0.6))) {
-      bpm = harmonicOverrideBpm!;
+      bpm = harmonicOverrideBpm;
       harmonicOverrideApplied = true;
       allowHarmonicShift = true;
       if (peakAdjustment != null && peakAdjustment.bpm > 0) {

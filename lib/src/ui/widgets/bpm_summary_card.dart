@@ -74,9 +74,6 @@ class BpmSummaryCard extends StatelessWidget {
     }
     algorithms.add(('wavelet_energy', 'Wavelet Energy'));
 
-    final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
-
     final rows = <Widget>[];
 
     for (final entry in algorithms) {

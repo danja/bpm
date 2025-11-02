@@ -169,7 +169,7 @@ class _ElapsedClock extends StatelessWidget {
         final color = viewModel.isRunning
             ? baseStyle.color
             : (theme.appBarTheme.foregroundColor ??
-                theme.colorScheme.onPrimary.withOpacity(0.7));
+                theme.colorScheme.onPrimary.withValues(alpha: 0.7));
 
         return AnimatedSwitcher(
           duration: const Duration(milliseconds: 250),

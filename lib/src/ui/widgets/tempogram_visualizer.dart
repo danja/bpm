@@ -31,7 +31,7 @@ class TempogramVisualizer extends StatelessWidget {
           color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: colorScheme.outline.withOpacity(0.2),
+            color: colorScheme.outline.withValues(alpha: 0.2),
             width: 1,
           ),
         ),
@@ -42,7 +42,7 @@ class TempogramVisualizer extends StatelessWidget {
               Icon(
                 Icons.graphic_eq,
                 size: 48,
-                color: colorScheme.onSurfaceVariant.withOpacity(0.3),
+                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
               ),
               const SizedBox(height: 8),
               Text(
@@ -50,7 +50,7 @@ class TempogramVisualizer extends StatelessWidget {
                     ? 'Tempogram (tap start)'
                     : 'Waiting for data...',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                 ),
               ),
             ],
@@ -65,7 +65,7 @@ class TempogramVisualizer extends StatelessWidget {
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: colorScheme.outline.withOpacity(0.2),
+          color: colorScheme.outline.withValues(alpha: 0.2),
           width: 1,
         ),
       ),
@@ -81,7 +81,7 @@ class TempogramVisualizer extends StatelessWidget {
                 color: colorScheme.surfaceContainerHighest,
                 border: Border(
                   bottom: BorderSide(
-                    color: colorScheme.outline.withOpacity(0.2),
+                    color: colorScheme.outline.withValues(alpha: 0.2),
                     width: 1,
                   ),
                 ),
@@ -256,13 +256,13 @@ class _TempogramPainter extends CustomPainter {
     double maxTime,
   ) {
     final textStyle = TextStyle(
-      color: colorScheme.onSurface.withOpacity(0.7),
+      color: colorScheme.onSurface.withValues(alpha: 0.7),
       fontSize: 10,
       fontFeatures: const [ui.FontFeature.tabularFigures()],
     );
 
     final axisPaint = Paint()
-      ..color = colorScheme.outline.withOpacity(0.3)
+      ..color = colorScheme.outline.withValues(alpha: 0.3)
       ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
 
@@ -290,7 +290,7 @@ class _TempogramPainter extends CustomPainter {
 
       // Grid line
       final gridPaint = Paint()
-        ..color = colorScheme.outline.withOpacity(0.1)
+        ..color = colorScheme.outline.withValues(alpha: 0.1)
         ..strokeWidth = 1;
       canvas.drawLine(
         Offset(leftMargin, y),

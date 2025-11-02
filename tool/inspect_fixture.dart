@@ -63,12 +63,6 @@ Future<void> main(List<String> args) async {
   }
 
   final consensusEngine = RobustConsensusEngine();
-  final normalized = consensusEngine.debugNormalizeForTesting(readings);
-  for (final reading in normalized) {
-    print(
-        'Normalized ${reading.algorithmId}: BPM=${reading.bpm.toStringAsFixed(3)}, conf=${reading.confidence.toStringAsFixed(3)}, metadata=${reading.metadata}',
-        );
-  }
   final consensus = consensusEngine.combine(readings);
   print('Consensus => ${consensus?.bpm} (conf=${consensus?.confidence})');
   if (consensus != null) {
