@@ -106,6 +106,44 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
+    // ENHANCEMENT: Subharmonic validation
+    // If 2F or 3F has higher energy than F, F is likely a subharmonic
+    var fundamentalBpm = bestBpm;
+    var fundamentalMagnitude = bestMagnitude;
+    var subharmonicCorrected = false;
+
+    // Check 2× harmonic
+    final doubleBpm = bestBpm * 2.0;
+    if (doubleBpm <= signal.context.maxBpm * 1.1) {
+      final doubleIndex = (doubleBpm / 60 / freqResolution).round();
+      if (doubleIndex > 0 && doubleIndex < spectrum.magnitudes.length) {
+        final doubleMagnitude = spectrum.magnitudes[doubleIndex];
+        if (doubleMagnitude > bestMagnitude * 0.8) {
+          // 2× has comparable energy, likely the fundamental
+          fundamentalBpm = doubleBpm;
+          fundamentalMagnitude = doubleMagnitude;
+          subharmonicCorrected = true;
+        }
+      }
+    }
+
+    // Check 3× harmonic (only if we haven't already corrected)
+    if (!subharmonicCorrected) {
+      final tripleBpm = bestBpm * 3.0;
+      if (tripleBpm <= signal.context.maxBpm * 1.1) {
+        final tripleIndex = (tripleBpm / 60 / freqResolution).round();
+        if (tripleIndex > 0 && tripleIndex < spectrum.magnitudes.length) {
+          final tripleMagnitude = spectrum.magnitudes[tripleIndex];
+          if (tripleMagnitude > bestMagnitude * 0.7) {
+            // 3× has comparable energy, might be the fundamental
+            fundamentalBpm = tripleBpm;
+            fundamentalMagnitude = tripleMagnitude;
+            subharmonicCorrected = true;
+          }
+        }
+      }
+    }
+
     final totalMagnitude = spectrum.magnitudes
         .sublist(minIndex, maxIndex + 1)
         .fold<double>(0, (sum, mag) => sum + mag);
@@ -115,10 +153,10 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
 
     // Emphasize the peak strongly - it's our most reliable signal
     // Only add harmonics if peak magnitude is strong relative to average
-    final peakStrength = bestMagnitude / (averageMagnitude + 1e-6);
+    final peakStrength = fundamentalMagnitude / (averageMagnitude + 1e-6);
     final neighbors = <TempoCandidate>[
       TempoCandidate(
-        bpm: bestBpm,
+        bpm: fundamentalBpm,
         weight: 3.0, // Heavily weight the peak (was 1.0)
         source: 'peak',
         allowHarmonics: false,
@@ -129,15 +167,15 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     // If peak is very strong (>4× average), don't confuse with harmonics
     if (peakStrength < 4.0) {
       neighbors.addAll([
-        TempoCandidate(bpm: bestBpm / 2, weight: 0.15, source: 'half'), // Reduced from 0.55
-        TempoCandidate(bpm: bestBpm * 2, weight: 0.1, source: 'double'), // Reduced from 0.5
-        TempoCandidate(bpm: bestBpm * 1.5, weight: 0.08, source: 'three-halves'), // Reduced from 0.35
-        TempoCandidate(bpm: bestBpm * 2 / 3, weight: 0.08, source: 'two-thirds'), // Reduced from 0.35
+        TempoCandidate(bpm: fundamentalBpm / 2, weight: 0.15, source: 'half'), // Reduced from 0.55
+        TempoCandidate(bpm: fundamentalBpm * 2, weight: 0.1, source: 'double'), // Reduced from 0.5
+        TempoCandidate(bpm: fundamentalBpm * 1.5, weight: 0.08, source: 'three-halves'), // Reduced from 0.35
+        TempoCandidate(bpm: fundamentalBpm * 2 / 3, weight: 0.08, source: 'two-thirds'), // Reduced from 0.35
       ]);
     }
 
     for (final harmonic in _spectrumHarmonicCandidates) {
-      final targetBpm = bestBpm * harmonic.ratio;
+      final targetBpm = fundamentalBpm * harmonic.ratio;
       if (!targetBpm.isFinite) {
         continue;
       }
@@ -338,14 +376,16 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final confidence =
-        ((bestMagnitude / averageMagnitude) * penalty).clamp(0.0, 1.0);
+        ((fundamentalMagnitude / averageMagnitude) * penalty).clamp(0.0, 1.0);
 
     final metadata = <String, Object?>{
       'fftSize': fftSize,
       'sampleRate': effectiveSampleRate,
-      'peakMagnitude': bestMagnitude,
+      'peakMagnitude': fundamentalMagnitude,
       'avgMagnitude': averageMagnitude,
       'rawBestBpm': bestBpm,
+      'subharmonicCorrected': subharmonicCorrected,
+      'fundamentalBpm': fundamentalBpm,
       'clusterConsistency': penalty,
     };
 

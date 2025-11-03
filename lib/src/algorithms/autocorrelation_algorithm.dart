@@ -120,9 +120,67 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
 
     final rawBpm = 60 * effectiveSampleRate / bestLag;
 
-    // Use best lag as primary
-    final primaryLag = bestLag;
-    final primaryScore = bestScore;
+    // ENHANCEMENT: Subharmonic suppression - prefer lags without strong subharmonics
+    // True fundamental has peaks at L, 2L, 3L but harmonics (like 2L) don't have peaks at L/2
+    final fundamentalScores = <int, double>{};
+    for (final entry in lagScores.entries) {
+      final lag = entry.key;
+      final score = entry.value;
+
+      var fundamentalScore = score;
+
+      // Penalize if subharmonic (L/2) has comparable or stronger peak
+      final halfLag = lag ~/ 2;
+      if (halfLag >= minLag && lagScores.containsKey(halfLag)) {
+        final halfScore = lagScores[halfLag]!;
+        if (halfScore > score * 0.6) {
+          // Strong subharmonic suggests this lag is a harmonic
+          fundamentalScore *= 0.3;
+        }
+      }
+
+      // Penalize if L/3 has strong peak (L might be 3× harmonic)
+      final thirdLag = lag ~/ 3;
+      if (thirdLag >= minLag && lagScores.containsKey(thirdLag)) {
+        final thirdScore = lagScores[thirdLag]!;
+        if (thirdScore > score * 0.5) {
+          fundamentalScore *= 0.5;
+        }
+      }
+
+      // Bonus if 2L has strong peak (confirms L is fundamental)
+      final doubleLag = lag * 2;
+      if (doubleLag <= maxLag && lagScores.containsKey(doubleLag)) {
+        final doubleScore = lagScores[doubleLag]!;
+        if (doubleScore > score * 0.3) {
+          fundamentalScore *= 1.3;
+        }
+      }
+
+      // Bonus if 3L has peak (further confirms fundamental)
+      final tripleLag = lag * 3;
+      if (tripleLag <= maxLag && lagScores.containsKey(tripleLag)) {
+        final tripleScore = lagScores[tripleLag]!;
+        if (tripleScore > score * 0.2) {
+          fundamentalScore *= 1.2;
+        }
+      }
+
+      fundamentalScores[lag] = fundamentalScore;
+    }
+
+    // Find best lag using fundamental-adjusted scores
+    var primaryLag = bestLag;
+    var primaryScore = bestScore;
+    var bestFundamentalScore = fundamentalScores[bestLag] ?? bestScore;
+
+    for (final entry in fundamentalScores.entries) {
+      if (entry.value > bestFundamentalScore) {
+        bestFundamentalScore = entry.value;
+        primaryLag = entry.key;
+        primaryScore = lagScores[entry.key] ?? entry.value;
+      }
+    }
 
     final histogram = IntervalHistogram(
       context: signal.context,
@@ -142,12 +200,34 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
 
       final interval = lag / effectiveSampleRate;
       // Weight more heavily by score - emphasize strong peaks
-      final baseWeight = score * score;
+      final rawWeight = score * score;
+      var directWeight = rawWeight;
+      var harmonicExpansionWeight = rawWeight;
+      final isPrimary = lag == primaryLag;
+
+      // ENHANCEMENT: Massively boost primaryLag, suppress its harmonics
+      if (isPrimary) {
+        // Give 50× weight to the identified fundamental's DIRECT interval only
+        directWeight *= 50.0;
+        // But don't boost its harmonic expansions
+        harmonicExpansionWeight *= 0.05;
+      } else {
+        // Check if this lag is a harmonic of primaryLag
+        final ratio = lag.toDouble() / primaryLag.toDouble();
+        if ((ratio - 2.0).abs() < 0.15 ||  // 2× harmonic
+            (ratio - 3.0).abs() < 0.15 ||  // 3× harmonic
+            (ratio - 1.5).abs() < 0.15 ||  // 3/2 harmonic
+            (ratio - 0.5).abs() < 0.15) {  // 1/2 subharmonic
+          // This is a harmonic of the primary - suppress it and its expansions
+          directWeight *= 0.02;
+          harmonicExpansionWeight *= 0.01;
+        }
+      }
 
       // Only add the primary interval - don't pollute with harmonics
       histogram.accumulate(
         interval: interval,
-        weight: baseWeight,
+        weight: directWeight,
         supporters: 1,
         source: 'lag',
       );
@@ -166,23 +246,23 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
         }
         histogram.accumulate(
           interval: scaledInterval,
-          weight: baseWeight * adjustment.weight,
+          weight: harmonicExpansionWeight * adjustment.weight,
           supporters: 0,
           source: adjustment.label,
         );
       }
 
       // Only add half/double for very strong peaks (>0.7 * best)
-      if (score > bestScore * 0.7) {
+      if (score > bestScore * 0.7 && !isPrimary) {
         histogram.accumulate(
           interval: interval * 2,
-          weight: baseWeight * 0.02,
+          weight: harmonicExpansionWeight * 0.02,
           supporters: 0,
           source: 'lag_double',
         );
         histogram.accumulate(
           interval: interval / 2,
-          weight: baseWeight * 0.015,
+          weight: harmonicExpansionWeight * 0.015,
           supporters: 0,
           source: 'half_lag',
         );
@@ -460,12 +540,15 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
         .clamp(0.0, 1.0);
 
     final metadata = <String, Object?>{
-      'lag': bestLag,
+      'lag': primaryLag,
       'evaluations': evaluations,
       'coarseStride': coarseStride,
       'sampleRate': effectiveSampleRate,
       'analysisSeconds': samples.length / effectiveSampleRate,
       'rawBpm': rawBpm,
+      'fundamentalCorrected': primaryLag != bestLag,
+      'fundamentalCorrectedFrom': bestLag,
+      'fundamentalScore': bestFundamentalScore,
       'clusterConsistency': penalty,
     };
 
