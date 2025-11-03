@@ -133,8 +133,10 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       final halfLag = lag ~/ 2;
       if (halfLag >= minLag && lagScores.containsKey(halfLag)) {
         final halfScore = lagScores[halfLag]!;
-        if (halfScore > score * 0.6) {
-          // Strong subharmonic suggests this lag is a harmonic
+        if (halfScore > score * 0.5) {
+          // Strong subharmonic suggests this lag is a harmonic - penalize heavily
+          fundamentalScore *= 0.1;
+        } else if (halfScore > score * 0.7) {
           fundamentalScore *= 0.3;
         }
       }
@@ -143,7 +145,9 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       final thirdLag = lag ~/ 3;
       if (thirdLag >= minLag && lagScores.containsKey(thirdLag)) {
         final thirdScore = lagScores[thirdLag]!;
-        if (thirdScore > score * 0.5) {
+        if (thirdScore > score * 0.4) {
+          fundamentalScore *= 0.2;
+        } else if (thirdScore > score * 0.6) {
           fundamentalScore *= 0.5;
         }
       }
@@ -152,8 +156,8 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       final doubleLag = lag * 2;
       if (doubleLag <= maxLag && lagScores.containsKey(doubleLag)) {
         final doubleScore = lagScores[doubleLag]!;
-        if (doubleScore > score * 0.3) {
-          fundamentalScore *= 1.3;
+        if (doubleScore > score * 0.2) {
+          fundamentalScore *= 1.5;
         }
       }
 
@@ -161,8 +165,8 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
       final tripleLag = lag * 3;
       if (tripleLag <= maxLag && lagScores.containsKey(tripleLag)) {
         final tripleScore = lagScores[tripleLag]!;
-        if (tripleScore > score * 0.2) {
-          fundamentalScore *= 1.2;
+        if (tripleScore > score * 0.15) {
+          fundamentalScore *= 1.4;
         }
       }
 
@@ -207,20 +211,24 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
 
       // ENHANCEMENT: Massively boost primaryLag, suppress its harmonics
       if (isPrimary) {
-        // Give 50× weight to the identified fundamental's DIRECT interval only
-        directWeight *= 50.0;
-        // But don't boost its harmonic expansions
-        harmonicExpansionWeight *= 0.05;
+        // Give 100× weight to the identified fundamental's DIRECT interval only
+        directWeight *= 100.0;
+        // But don't boost its harmonic expansions at all
+        harmonicExpansionWeight *= 0.01;
       } else {
-        // Check if this lag is a harmonic of primaryLag
+        // Check if this lag is a harmonic of primaryLag - add more ratios
         final ratio = lag.toDouble() / primaryLag.toDouble();
         if ((ratio - 2.0).abs() < 0.15 ||  // 2× harmonic
             (ratio - 3.0).abs() < 0.15 ||  // 3× harmonic
             (ratio - 1.5).abs() < 0.15 ||  // 3/2 harmonic
+            (ratio - 4.0/3.0).abs() < 0.15 ||  // 4/3 harmonic
+            (ratio - 3.0/4.0).abs() < 0.15 ||  // 3/4 subharmonic
+            (ratio - 5.0/4.0).abs() < 0.15 ||  // 5/4 harmonic
+            (ratio - 4.0/5.0).abs() < 0.15 ||  // 4/5 subharmonic
             (ratio - 0.5).abs() < 0.15) {  // 1/2 subharmonic
-          // This is a harmonic of the primary - suppress it and its expansions
-          directWeight *= 0.02;
-          harmonicExpansionWeight *= 0.01;
+          // This is a harmonic of the primary - suppress it very heavily
+          directWeight *= 0.01;
+          harmonicExpansionWeight *= 0.001;
         }
       }
 

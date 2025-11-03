@@ -106,41 +106,79 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    // ENHANCEMENT: Subharmonic validation
-    // If 2F or 3F has higher energy than F, F is likely a subharmonic
+    // ENHANCEMENT: Aggressive subharmonic validation
+    // If harmonics have higher energy than F, F is likely a subharmonic
     var fundamentalBpm = bestBpm;
     var fundamentalMagnitude = bestMagnitude;
     var subharmonicCorrected = false;
 
-    // Check 2× harmonic
+    // Build a score for each potential fundamental by checking its harmonics
+    final candidates = <double, double>{};
+
+    // Check if bestBpm itself is good (has strong harmonics at 2×, 3×)
+    var bestBpmScore = bestMagnitude;
+    final double2 = (bestBpm * 2.0 / 60 / freqResolution).round();
+    final double3 = (bestBpm * 3.0 / 60 / freqResolution).round();
+    if (double2 < spectrum.magnitudes.length) {
+      bestBpmScore += spectrum.magnitudes[double2] * 0.5;
+    }
+    if (double3 < spectrum.magnitudes.length) {
+      bestBpmScore += spectrum.magnitudes[double3] * 0.3;
+    }
+    candidates[bestBpm] = bestBpmScore;
+
+    // Check if 2× bestBpm might be the fundamental
     final doubleBpm = bestBpm * 2.0;
     if (doubleBpm <= signal.context.maxBpm * 1.1) {
       final doubleIndex = (doubleBpm / 60 / freqResolution).round();
       if (doubleIndex > 0 && doubleIndex < spectrum.magnitudes.length) {
         final doubleMagnitude = spectrum.magnitudes[doubleIndex];
-        if (doubleMagnitude > bestMagnitude * 0.8) {
-          // 2× has comparable energy, likely the fundamental
-          fundamentalBpm = doubleBpm;
-          fundamentalMagnitude = doubleMagnitude;
-          subharmonicCorrected = true;
+        var doubleScore = doubleMagnitude;
+
+        // Check its harmonics
+        final double2x = (doubleBpm * 2.0 / 60 / freqResolution).round();
+        if (double2x < spectrum.magnitudes.length) {
+          doubleScore += spectrum.magnitudes[double2x] * 0.5;
+        }
+
+        // If 2× has better harmonic support, prefer it
+        if (doubleScore > bestBpmScore * 0.7) {
+          candidates[doubleBpm] = doubleScore;
         }
       }
     }
 
-    // Check 3× harmonic (only if we haven't already corrected)
-    if (!subharmonicCorrected) {
-      final tripleBpm = bestBpm * 3.0;
-      if (tripleBpm <= signal.context.maxBpm * 1.1) {
-        final tripleIndex = (tripleBpm / 60 / freqResolution).round();
-        if (tripleIndex > 0 && tripleIndex < spectrum.magnitudes.length) {
-          final tripleMagnitude = spectrum.magnitudes[tripleIndex];
-          if (tripleMagnitude > bestMagnitude * 0.7) {
-            // 3× has comparable energy, might be the fundamental
-            fundamentalBpm = tripleBpm;
-            fundamentalMagnitude = tripleMagnitude;
-            subharmonicCorrected = true;
-          }
+    // Check if 3× bestBpm might be the fundamental
+    final tripleBpm = bestBpm * 3.0;
+    if (tripleBpm <= signal.context.maxBpm * 1.1) {
+      final tripleIndex = (tripleBpm / 60 / freqResolution).round();
+      if (tripleIndex > 0 && tripleIndex < spectrum.magnitudes.length) {
+        final tripleMagnitude = spectrum.magnitudes[tripleIndex];
+        var tripleScore = tripleMagnitude;
+
+        // Check its harmonics
+        final triple2x = (tripleBpm * 2.0 / 60 / freqResolution).round();
+        if (triple2x < spectrum.magnitudes.length) {
+          tripleScore += spectrum.magnitudes[triple2x] * 0.5;
         }
+
+        if (tripleScore > bestBpmScore * 0.6) {
+          candidates[tripleBpm] = tripleScore;
+        }
+      }
+    }
+
+    // Select candidate with best harmonic support
+    var maxScore = 0.0;
+    for (final entry in candidates.entries) {
+      if (entry.value > maxScore) {
+        maxScore = entry.value;
+        fundamentalBpm = entry.key;
+        final fundamentalIndex = (fundamentalBpm / 60 / freqResolution).round();
+        if (fundamentalIndex >= 0 && fundamentalIndex < spectrum.magnitudes.length) {
+          fundamentalMagnitude = spectrum.magnitudes[fundamentalIndex];
+        }
+        subharmonicCorrected = entry.key != bestBpm;
       }
     }
 

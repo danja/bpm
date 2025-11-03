@@ -152,7 +152,7 @@ class PreprocessingPipeline {
       label: 'low',
       lowCutoff: 20.0,
       highCutoff: 140.0,
-      weight: 0.45,
+      weight: 0.50, // ENHANCEMENT: Increase bass/kick weight (was 0.45)
       frameSizeMs: 40.0,
       hopSizeMs: 12.0,
     ),
@@ -160,7 +160,7 @@ class PreprocessingPipeline {
       label: 'mid',
       lowCutoff: 140.0,
       highCutoff: 480.0,
-      weight: 0.35,
+      weight: 0.38, // ENHANCEMENT: Increase mid/snare weight (was 0.35)
       frameSizeMs: 28.0,
       hopSizeMs: 9.0,
     ),
@@ -168,7 +168,7 @@ class PreprocessingPipeline {
       label: 'high',
       lowCutoff: 480.0,
       highCutoff: 1500.0,
-      weight: 0.20,
+      weight: 0.12, // ENHANCEMENT: Reduce high-hat weight (was 0.20)
       frameSizeMs: 22.0,
       hopSizeMs: 8.0,
     ),
@@ -233,7 +233,7 @@ class PreprocessingPipeline {
         ? _blendEnvelopes(
             primary: baseOnset,
             secondary: multiBand.combined,
-            secondaryMix: 0.0,
+            secondaryMix: 0.7, // ENHANCEMENT: Use multi-band onset (was 0.0)
           )
         : baseOnset;
 
