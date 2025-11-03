@@ -120,6 +120,10 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
 
     final rawBpm = 60 * effectiveSampleRate / bestLag;
 
+    // Use best lag as primary
+    final primaryLag = bestLag;
+    final primaryScore = bestScore;
+
     final histogram = IntervalHistogram(
       context: signal.context,
       binSize: 0.02,
@@ -223,19 +227,24 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
     final histogramSelection = histogram.select();
     final candidates = histogram.toTempoCandidates();
 
-    // Add the raw best lag with strong weight - this is our most reliable estimate
-    if (bestLag > 0 && bestScore > 0 && rawBpm.isFinite) {
-      // Weight the best lag very heavily - it should dominate unless histogram has strong consensus
-      final bestLagWeight = bestScore * 2.2;
+    // ENHANCEMENT: Add the PRIMARY lag (fundamental-corrected) with very strong weight
+    if (primaryLag > 0 && primaryScore > 0) {
+      final primaryBpm = 60 * effectiveSampleRate / primaryLag;
+      // Weight the primary lag MASSIVELY (20×) - it should overwhelmingly dominate
+      // If HPS found a different fundamental, weight it even higher (30×)
+      final hpsCorrected = primaryLag != bestLag;
+      final baseWeight = hpsCorrected ? 30.0 : 20.0;
+      final primaryLagWeight = primaryScore * baseWeight;
       candidates.add(
         TempoCandidate(
-          bpm: rawBpm,
-          weight: bestLagWeight,
-          source: 'best_lag',
+          bpm: primaryBpm,
+          weight: primaryLagWeight,
+          source: hpsCorrected ? 'hps_fundamental' : 'best_lag',
         ),
       );
+      // Add harmonic expansions with reduced weight
       for (final expansion in _bestLagExpansions) {
-        final candidateBpm = rawBpm * expansion.multiplier;
+        final candidateBpm = primaryBpm * expansion.multiplier;
         if (!candidateBpm.isFinite) {
           continue;
         }
@@ -246,34 +255,34 @@ class AutocorrelationAlgorithm extends BpmDetectionAlgorithm {
         candidates.add(
           TempoCandidate(
             bpm: candidateBpm,
-            weight: bestLagWeight * expansion.weightScale,
+            weight: primaryLagWeight * expansion.weightScale * 0.5,
             source: expansion.label,
             allowHarmonics: false,
           ),
         );
       }
-      final doubleCandidate = rawBpm * 2;
+      final doubleCandidate = primaryBpm * 2;
       if (doubleCandidate.isFinite &&
           doubleCandidate >= signal.context.minBpm * 0.85 &&
           doubleCandidate <= signal.context.maxBpm * 1.2) {
         candidates.add(
           TempoCandidate(
             bpm: doubleCandidate,
-            weight: bestLagWeight * 0.25,
-            source: 'best_lag_double',
+            weight: primaryLagWeight * 0.15,
+            source: 'hps_double',
             allowHarmonics: false,
           ),
         );
       }
-      final tripleCandidate = rawBpm * 3;
+      final tripleCandidate = primaryBpm * 3;
       if (tripleCandidate.isFinite &&
           tripleCandidate >= signal.context.minBpm * 0.85 &&
           tripleCandidate <= signal.context.maxBpm * 1.2) {
         candidates.add(
           TempoCandidate(
             bpm: tripleCandidate,
-            weight: bestLagWeight * 0.85,
-            source: 'best_lag_triple',
+            weight: primaryLagWeight * 0.5,
+            source: 'hps_triple',
             allowHarmonics: false,
           ),
         );
@@ -651,6 +660,9 @@ double? _selectHistogramCandidateByRatio({
     if (relative < minRelative) {
       return;
     }
+    if (score <= baseScore * 0.8) {
+      return;
+    }
     if (score > bestScore + 1e-6 ||
         (score - bestScore).abs() <= 1e-6 &&
             (bestBpm == null || candidateBpm < bestBpm!)) {
@@ -751,3 +763,9 @@ const List<_LagExpansion> _bestLagExpansions = [
     label: 'best_lag_times_4over5',
   ),
 ];
+
+/// Apply Harmonic Product Spectrum to autocorrelation lag scores.
+///
+/// Multiplies autocorrelation at lag L with values at 2L, 3L, 4L, etc.
+/// The true fundamental will have strong autocorrelation at all its multiples.
+/// Harmonics won't have strong autocorrelation at their sub-harmonics.

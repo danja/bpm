@@ -11,6 +11,35 @@ import 'onset_detection.dart';
 import 'signal_utils.dart';
 import 'tempogram.dart';
 
+/// Onset envelope computed for a specific frequency band.
+class BandOnsetEnvelope {
+  const BandOnsetEnvelope({
+    required this.label,
+    required this.lowCutoff,
+    required this.highCutoff,
+    required this.weight,
+    required this.envelope,
+  });
+
+  /// Human-readable label (e.g., `low`, `mid`, `high`).
+  final String label;
+
+  /// Lower cutoff frequency in Hz.
+  final double lowCutoff;
+
+  /// Upper cutoff frequency in Hz.
+  final double highCutoff;
+
+  /// Weight used when combining this band into the aggregate onset envelope.
+  final double weight;
+
+  /// Normalized onset envelope for this band.
+  final Float32List envelope;
+
+  /// Center frequency helper.
+  double get centerFrequency => (lowCutoff + highCutoff) * 0.5;
+}
+
 /// Preprocessed signal with derived features for algorithm analysis.
 ///
 /// Contains multiple representations of the audio signal optimized for
@@ -22,6 +51,7 @@ class PreprocessedSignal {
     required this.normalizedSamples,
     required this.filteredSamples,
     required this.onsetEnvelope,
+    required this.multiBandOnsetEnvelopes,
     required this.samples8kHz,
     required this.samples400Hz,
     required this.melSpectrogram,
@@ -50,6 +80,9 @@ class PreprocessedSignal {
 
   /// Energy-based onset strength envelope
   final Float32List onsetEnvelope;
+
+  /// Band-specific onset envelopes (low/mid/high rhythm emphasis)
+  final List<BandOnsetEnvelope> multiBandOnsetEnvelopes;
 
   /// Downsampled to 8 kHz (for autocorrelation)
   final Float32List samples8kHz;
@@ -114,6 +147,32 @@ class PreprocessingPipeline {
 
   static final NoveltyComputer _noveltyComputer = NoveltyComputer();
   static final TempogramComputer _tempogramComputer = TempogramComputer();
+  static const List<_OnsetBandConfig> _onsetBandConfigs = [
+    _OnsetBandConfig(
+      label: 'low',
+      lowCutoff: 20.0,
+      highCutoff: 140.0,
+      weight: 0.45,
+      frameSizeMs: 40.0,
+      hopSizeMs: 12.0,
+    ),
+    _OnsetBandConfig(
+      label: 'mid',
+      lowCutoff: 140.0,
+      highCutoff: 480.0,
+      weight: 0.35,
+      frameSizeMs: 28.0,
+      hopSizeMs: 9.0,
+    ),
+    _OnsetBandConfig(
+      label: 'high',
+      lowCutoff: 480.0,
+      highCutoff: 1500.0,
+      weight: 0.20,
+      frameSizeMs: 22.0,
+      hopSizeMs: 8.0,
+    ),
+  ];
 
   /// Processes audio frames into preprocessed signal.
   ///
@@ -155,14 +214,28 @@ class PreprocessingPipeline {
       highCutoff: 1500.0,
     );
 
-    // Step 4: Compute onset envelope (energy-based)
-    final onset = energyOnsetEnvelope(
+    // Step 4: Compute baseline and multi-band onset envelopes
+    final baseOnset = energyOnsetEnvelope(
       filtered,
       sampleRate,
       frameSizeMs: 30.0,
       hopSizeMs: 10.0,
       smooth: true,
     );
+
+    final multiBand = _computeMultiBandOnsets(
+      samples: normalized,
+      sampleRate: sampleRate,
+      referenceLength: baseOnset.length,
+    );
+
+    final onset = multiBand != null
+        ? _blendEnvelopes(
+            primary: baseOnset,
+            secondary: multiBand.combined,
+            secondaryMix: 0.0,
+          )
+        : baseOnset;
 
     // Step 5: Create downsampled variants for efficiency
     final samples8kHz = _downsampleTo(filtered, sampleRate, targetRate: 8000);
@@ -200,6 +273,7 @@ class PreprocessingPipeline {
       normalizedSamples: normalized,
       filteredSamples: filtered,
       onsetEnvelope: onset,
+      multiBandOnsetEnvelopes: multiBand?.bands ?? const [],
       samples8kHz: samples8kHz,
       samples400Hz: samples400Hz,
       melSpectrogram: melFeatures.frames,
@@ -237,6 +311,172 @@ class PreprocessingPipeline {
     return Float32List.fromList(downsampled);
   }
 
+  _MultiBandOnsetResult? _computeMultiBandOnsets({
+    required Float32List samples,
+    required int sampleRate,
+    required int referenceLength,
+  }) {
+    if (samples.isEmpty || sampleRate <= 0) {
+      return null;
+    }
+
+    final nyquist = sampleRate * 0.5;
+    final bands = <BandOnsetEnvelope>[];
+    Float32List? aggregate;
+    double weightSum = 0.0;
+
+    for (final config in _onsetBandConfigs) {
+      final highCut = math.min(config.highCutoff, nyquist - 20.0);
+      if (highCut <= config.lowCutoff + 5.0) {
+        continue;
+      }
+
+      final bandFiltered = bandpassFilter(
+        samples,
+        sampleRate,
+        lowCutoff: config.lowCutoff,
+        highCutoff: highCut,
+      );
+      if (bandFiltered.isEmpty) {
+        continue;
+      }
+
+      final envelope = energyOnsetEnvelope(
+        bandFiltered,
+        sampleRate,
+        frameSizeMs: config.frameSizeMs,
+        hopSizeMs: config.hopSizeMs,
+        smooth: true,
+      );
+      if (envelope.isEmpty) {
+        continue;
+      }
+
+      var normalized = _normalizeEnvelope(envelope);
+      if (normalized.isEmpty) {
+        continue;
+      }
+
+      bands.add(
+        BandOnsetEnvelope(
+          label: config.label,
+          lowCutoff: config.lowCutoff,
+          highCutoff: highCut,
+          weight: config.weight,
+          envelope: normalized,
+        ),
+      );
+
+      if (referenceLength > 0 && normalized.length != referenceLength) {
+        normalized = _resizeEnvelope(normalized, referenceLength);
+      }
+
+      aggregate ??= Float32List(normalized.length);
+      final length = math.min(aggregate.length, normalized.length);
+      for (var i = 0; i < length; i++) {
+        aggregate[i] += normalized[i] * config.weight;
+      }
+      weightSum += config.weight;
+    }
+
+    if (bands.isEmpty || aggregate == null || aggregate.isEmpty) {
+      return null;
+    }
+
+    if (weightSum > 0) {
+      for (var i = 0; i < aggregate.length; i++) {
+        aggregate[i] /= weightSum;
+      }
+    }
+
+    Float32List aggregateResized = aggregate;
+    if (referenceLength > 0 && aggregate.length != referenceLength) {
+      aggregateResized = _resizeEnvelope(aggregate, referenceLength);
+    }
+
+    final normalizedAggregate = _normalizeEnvelope(aggregateResized);
+    if (normalizedAggregate.isEmpty) {
+      return null;
+    }
+
+    final smoothed = exponentialSmooth(normalizedAggregate, alpha: 0.18);
+
+    return _MultiBandOnsetResult(
+      bands: bands,
+      combined: smoothed,
+    );
+  }
+
+  Float32List _normalizeEnvelope(Float32List envelope) {
+    if (envelope.isEmpty) {
+      return Float32List(0);
+    }
+
+    var maxValue = 0.0;
+    for (final value in envelope) {
+      if (value > maxValue) {
+        maxValue = value;
+      }
+    }
+
+    if (maxValue <= 1e-9) {
+      return Float32List(envelope.length);
+    }
+
+    final normalized = Float32List(envelope.length);
+    for (var i = 0; i < envelope.length; i++) {
+      normalized[i] = (envelope[i] / maxValue).clamp(0.0, 1.0);
+    }
+
+    return normalized;
+  }
+
+  Float32List _resizeEnvelope(Float32List envelope, int targetLength) {
+    if (targetLength <= 0) {
+      return Float32List(0);
+    }
+    if (envelope.length == targetLength) {
+      return envelope;
+    }
+
+    final resized = Float32List(targetLength);
+    final ratio = envelope.length / targetLength;
+    for (var i = 0; i < targetLength; i++) {
+      final sourceIndex = (i * ratio).floor().clamp(0, envelope.length - 1);
+      resized[i] = envelope[sourceIndex];
+    }
+    return resized;
+  }
+
+  Float32List _blendEnvelopes({
+    required Float32List primary,
+    required Float32List secondary,
+    required double secondaryMix,
+  }) {
+    if (primary.isEmpty) {
+      return Float32List(0);
+    }
+
+    final mix = secondaryMix.clamp(0.0, 1.0);
+    if (mix <= 1e-6 || secondary.isEmpty) {
+      return primary;
+    }
+
+    final primaryNorm = _normalizeEnvelope(primary);
+    final secondaryNorm = _normalizeEnvelope(
+      secondary.length == primaryNorm.length
+          ? secondary
+          : _resizeEnvelope(secondary, primaryNorm.length),
+    );
+
+    final blended = Float32List(primaryNorm.length);
+    for (var i = 0; i < blended.length; i++) {
+      blended[i] =
+          ((1 - mix) * primaryNorm[i] + mix * secondaryNorm[i]).clamp(0.0, 1.0);
+    }
+    return blended;
+  }
+
   /// Creates an empty preprocessed signal for edge cases.
   PreprocessedSignal _emptySignal(DetectionContext context) {
     final empty = Float32List(0);
@@ -260,9 +500,38 @@ class PreprocessingPipeline {
       duration: Duration.zero,
       context: context,
       noiseFloor: 0.0,
+      multiBandOnsetEnvelopes: const [],
     );
   }
 }
 
 /// Singleton instance for convenience.
 const preprocessingPipeline = PreprocessingPipeline();
+
+class _MultiBandOnsetResult {
+  const _MultiBandOnsetResult({
+    required this.bands,
+    required this.combined,
+  });
+
+  final List<BandOnsetEnvelope> bands;
+  final Float32List combined;
+}
+
+class _OnsetBandConfig {
+  const _OnsetBandConfig({
+    required this.label,
+    required this.lowCutoff,
+    required this.highCutoff,
+    required this.weight,
+    this.frameSizeMs = 30.0,
+    this.hopSizeMs = 10.0,
+  });
+
+  final String label;
+  final double lowCutoff;
+  final double highCutoff;
+  final double weight;
+  final double frameSizeMs;
+  final double hopSizeMs;
+}

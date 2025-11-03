@@ -33,19 +33,32 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    // Smooth the envelope
-    final smoothed = _smooth(envelope, max(3, envelope.length ~/ 60));
+    // ENHANCEMENT: Multi-scale smoothing to detect peaks at different resolutions
+    final timeScale = signal.onsetTimeScale;
+    final baseSmooth = max(3, envelope.length ~/ 60);
+    final smoothed = _smooth(envelope, baseSmooth);
+
+    // Also create a more heavily smoothed version to find main beats
+    final heavySmooth = _smooth(envelope, baseSmooth * 2);
 
     // Detect peaks in the smoothed envelope
-    final timeScale = signal.onsetTimeScale;
     final minSeparationSeconds =
         (60.0 / signal.context.maxBpm).clamp(0.15, 0.8) * 0.85;
     final minSeparationSamples =
         max(2, (minSeparationSeconds / timeScale).round());
-    final peaks = _detectPeaks(
+
+    // Detect peaks at both scales
+    final finePeaks = _detectPeaks(
       smoothed,
       minSeparation: minSeparationSamples,
     );
+    final coarsePeaks = _detectPeaks(
+      heavySmooth,
+      minSeparation: (minSeparationSamples * 1.5).round(),
+    );
+
+    // Use coarse peaks if they look good, otherwise fine peaks
+    final peaks = coarsePeaks.length >= 6 ? coarsePeaks : finePeaks;
     if (peaks.length < 8 && minSeparationSamples > 2) {
       final relaxedSeparation =
           max(2, (minSeparationSamples * 0.6).round());
@@ -408,7 +421,10 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     );
 
     for (final interval in dominantIntervals) {
-      final baseWeight = interval * interval;
+      // ENHANCEMENT: Use cubic weighting to STRONGLY favor longer intervals (slower BPMs)
+      // This helps reject subdivisions that create many short intervals
+      final baseWeight = interval * interval * interval;
+
       histogram.accumulate(
         interval: interval,
         weight: baseWeight,
@@ -417,19 +433,19 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
       );
       histogram.accumulate(
         interval: interval * 2,
-        weight: baseWeight * 0.18,
+        weight: baseWeight * 0.12, // Reduced from 0.18
         supporters: 0,
         source: 'double_interval',
       );
       histogram.accumulate(
         interval: interval * 3,
-        weight: baseWeight * 0.05,
+        weight: baseWeight * 0.03, // Reduced from 0.05
         supporters: 0,
         source: 'triple_interval',
       );
       histogram.accumulate(
         interval: interval / 2,
-        weight: baseWeight * 0.05,
+        weight: baseWeight * 0.02, // Reduced from 0.05 - strongly suppress subdivisions
         supporters: 0,
         source: 'half_interval',
       );
@@ -472,8 +488,9 @@ class SimpleOnsetAlgorithm extends BpmDetectionAlgorithm {
     }
 
     histogram.applyLengthBoost();
-    histogram.suppressShorterHarmonics(minShare: 0.22);
-    histogram.suppressLongerHarmonics(minShare: 0.24);
+    // ENHANCEMENT: More aggressive harmonic suppression to reject subdivisions
+    histogram.suppressShorterHarmonics(minShare: 0.18, suppressionFactor: 0.08); // Stronger suppression
+    histogram.suppressLongerHarmonics(minShare: 0.20, suppressionFactor: 0.20);
 
     return histogram.select();
   }
@@ -511,6 +528,9 @@ double? _preferFasterHistogramInterval(
     }
     final ratio = candidateBpm / currentBpm;
     if (ratio < 1.04 || ratio > 1.28) {
+      return;
+    }
+    if (score <= currentScore * 0.75) {
       return;
     }
     final relative = currentScore == 0 ? 0.0 : score / currentScore;

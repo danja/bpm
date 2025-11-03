@@ -1,4 +1,4 @@
-import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:bpm/src/algorithms/algorithm_utils.dart';
 import 'package:bpm/src/algorithms/bpm_detection_algorithm.dart';
@@ -48,7 +48,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
-    final maxSamples = min(
+    final maxSamples = math.min(
       envelope.length,
       effectiveSampleRate * maxWindowSeconds,
     );
@@ -65,7 +65,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     final fftSize = _boundedPowerOfTwo(trimmed.length, minFftSize);
 
     final padded = List<double>.filled(fftSize, 0)
-      ..setRange(0, min(trimmed.length, fftSize), trimmed);
+      ..setRange(0, math.min(trimmed.length, fftSize), trimmed);
 
     final windowed = SignalUtils.applyHannWindow(padded);
     final spectrum = FftUtils.magnitudeSpectrum(windowed);
@@ -74,15 +74,13 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
     }
 
     final freqResolution = effectiveSampleRate / spectrum.size;
-    var bestBpm = 0.0;
-    var bestMagnitude = 0.0;
 
     // Find peak in BPM range
-    final minIndex = max(
+    final minIndex = math.max(
       1,
       (signal.context.minBpm / 60 / freqResolution).ceil(),
     );
-    final maxIndex = min(
+    final maxIndex = math.min(
       spectrum.magnitudes.length - 1,
       (signal.context.maxBpm / 60 / freqResolution).floor(),
     );
@@ -90,13 +88,17 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
       return null;
     }
 
+    // Find peak in raw spectrum
+    // TODO: Re-enable HPS after fixing implementation
+    var bestBpm = 0.0;
+    var bestMagnitude = 0.0;
+
     for (var i = minIndex; i <= maxIndex; i++) {
-      final frequencyHz = i * freqResolution;
-      final bpm = frequencyHz * 60;
       final magnitude = spectrum.magnitudes[i];
       if (magnitude > bestMagnitude) {
         bestMagnitude = magnitude;
-        bestBpm = bpm;
+        final frequencyHz = i * freqResolution;
+        bestBpm = frequencyHz * 60;
       }
     }
 
@@ -332,7 +334,7 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
             : (1.0 - (fallbackAdjustment.multiplier - 1.0).abs() * 0.2)
                 .clamp(0.6, 1.0));
     if (fundamentalGuardApplied) {
-      penalty = max(0.6, penalty * 0.9);
+      penalty = math.max(0.6, penalty * 0.9);
     }
 
     final confidence =
@@ -388,9 +390,9 @@ class FftSpectrumAlgorithm extends BpmDetectionAlgorithm {
 }
 
 int _boundedPowerOfTwo(int sampleCount, int minSize) {
-  final desired = max(minSize, sampleCount);
+  final desired = math.max(minSize, sampleCount);
   final nextPower = SignalUtils.nextPowerOfTwo(desired);
-  return min(8192, nextPower);
+  return math.min(8192, nextPower);
 }
 
 int? _bestMagnitudeIndex(

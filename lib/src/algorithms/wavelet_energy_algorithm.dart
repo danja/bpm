@@ -84,6 +84,7 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     double aggregatedWeight = 0;
 
     final diagnostics = <Map<String, dynamic>>[];
+    final scaleDetails = <_ScaleDetail>[];
 
     for (var level = 0; level < detailBands.length; level++) {
       final detail = detailBands[level];
@@ -122,6 +123,19 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       if (score <= 0) continue;
       final candidateLagSamples = lag * scale;
       final weightedScore = score / sqrt(scale);
+
+      scaleDetails.add(
+        _ScaleDetail(
+          level: level,
+          scale: scale,
+          lagSamples: candidateLagSamples,
+          score: score,
+          weightedScore: weightedScore,
+          bpm: 60 * effectiveSampleRate / candidateLagSamples,
+          envelope: upsampled,
+        ),
+      );
+
       diagnostics.add({
         'level': level,
         'scale': scale,
@@ -210,6 +224,9 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
     List<double>? finalEnvelope;
     int? finalLagSamples;
     var usedAggregate = false;
+    var crossScaleAdjusted = false;
+    double? crossScaleOverrideRatio;
+    _CrossScaleEvaluation? crossScaleEvaluation;
 
     if (candidateScore != null && candidateLagSamples != null) {
       finalEnvelope = candidateEnvelope;
@@ -228,6 +245,44 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
 
     if (finalEnvelope == null || finalLagSamples == null) {
       return null;
+    }
+
+    if (scaleDetails.isNotEmpty) {
+      final initialBpm = 60 * effectiveSampleRate / finalLagSamples;
+      crossScaleEvaluation = _evaluateCrossScaleSupport(
+        targetBpm: initialBpm,
+        details: scaleDetails,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
+
+      final override = crossScaleEvaluation.overrideDetail;
+      if (override != null) {
+        finalEnvelope = override.envelope;
+        finalLagSamples = override.lagSamples;
+        candidateLagSamples = override.lagSamples;
+        candidateScore = SignalUtils.autocorrelation(
+          finalEnvelope,
+          finalLagSamples,
+        );
+        if (candidateScore != null && candidateScore <= 0) {
+          candidateScore = null;
+        }
+        bestLevel = override.level;
+        bestScale = override.scale;
+        bestWeightedScore = override.weightedScore;
+        bestBpm = override.bpm;
+        usedAggregate = false;
+        crossScaleAdjusted = true;
+        crossScaleOverrideRatio = crossScaleEvaluation.overrideRatio;
+
+        crossScaleEvaluation = _evaluateCrossScaleSupport(
+          targetBpm: override.bpm,
+          details: scaleDetails,
+          minBpm: signal.context.minBpm,
+          maxBpm: signal.context.maxBpm,
+        );
+      }
     }
 
     final fallback = _fallbackLag(
@@ -251,6 +306,15 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         fallbackUsed = true;
         usedAggregate = false;
       }
+    }
+
+    if (scaleDetails.isNotEmpty) {
+      crossScaleEvaluation = _evaluateCrossScaleSupport(
+        targetBpm: 60 * effectiveSampleRate / finalLagSamples,
+        details: scaleDetails,
+        minBpm: signal.context.minBpm,
+        maxBpm: signal.context.maxBpm,
+      );
     }
 
     final resolvedBpm = 60 * effectiveSampleRate / finalLagSamples;
@@ -402,8 +466,24 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       aggregateStrength * 2.0
     ].reduce(max).clamp(0.0, 1.0);
 
+    final crossScaleAgreement = crossScaleEvaluation?.agreement ?? 0.5;
+    final crossScaleSupportingScales = crossScaleEvaluation?.supportCount ?? 0;
+
+    var scaleAgreementMultiplier =
+        (0.55 + 0.45 * crossScaleAgreement).clamp(0.5, 1.05);
+    if (crossScaleSupportingScales <= 1 && crossScaleAgreement < 0.4) {
+      scaleAgreementMultiplier *= 0.82;
+    } else if (crossScaleSupportingScales >= 2 && crossScaleAgreement > 0.7) {
+      scaleAgreementMultiplier =
+          (scaleAgreementMultiplier + 0.05).clamp(0.5, 1.1);
+    }
+
+    final baseConfidence =
+        (0.55 * envelopeStrength + 0.45 * harmonicPenalty)
+            .clamp(0.0, 1.0)
+            .toDouble();
     var confidence =
-        (0.55 * envelopeStrength + 0.45 * harmonicPenalty).clamp(0.0, 1.0);
+        (baseConfidence * scaleAgreementMultiplier).clamp(0.0, 1.0).toDouble();
     var plpNormalized = false;
     if (plpAnchorBpm != null && plpAnchorBpm > 0) {
       final normalized = AlgorithmUtils.normalizeToReference(
@@ -471,9 +551,17 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
         harmonicOverrideApplied = true;
       }
     }
+    final crossScaleWinnerRatio = crossScaleEvaluation?.winnerRatio;
+    final crossScaleWinnerWeight = crossScaleEvaluation?.winnerWeight;
+    final crossScaleWinnerCount = crossScaleEvaluation?.winnerCount;
+
     final metadata = <String, Object?>{
       'lagSamples': finalLagSamples,
-      'level': usedAggregate ? -1 : bestLevel,
+      'level': usedAggregate
+          ? -1
+          : (fallbackUsed
+              ? -2
+              : bestLevel),
       'refined': refine != null && !usedAggregate,
       'aggregationUsed': usedAggregate,
       'fallbackUsed': fallbackUsed,
@@ -489,6 +577,19 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
       if (harmonicOverrideApplied) 'harmonicOverrideApplied': true,
       if (harmonicOverrideRatio != null)
         'harmonicOverrideRatio': harmonicOverrideRatio,
+      if (crossScaleEvaluation != null)
+        'crossScaleAgreement': crossScaleAgreement,
+      if (crossScaleEvaluation != null)
+        'crossScaleSupportCount': crossScaleSupportingScales,
+      if (crossScaleWinnerRatio != null)
+        'crossScaleWinnerRatio': crossScaleWinnerRatio,
+      if (crossScaleWinnerWeight != null)
+        'crossScaleWinnerWeight': crossScaleWinnerWeight,
+      if (crossScaleWinnerCount != null)
+        'crossScaleWinnerCount': crossScaleWinnerCount,
+      if (crossScaleAdjusted) 'crossScaleAdjusted': true,
+      if (crossScaleOverrideRatio != null)
+        'crossScaleOverrideRatio': crossScaleOverrideRatio,
     };
 
     if (refinement != null) {
@@ -613,6 +714,196 @@ class WaveletEnergyAlgorithm extends BpmDetectionAlgorithm {
 
     return _LagResult(lagSamples: lag, normalized: normalized);
   }
+
+  _CrossScaleEvaluation _evaluateCrossScaleSupport({
+    required double targetBpm,
+    required List<_ScaleDetail> details,
+    required double minBpm,
+    required double maxBpm,
+  }) {
+    if (details.isEmpty || !targetBpm.isFinite || targetBpm <= 0) {
+      return const _CrossScaleEvaluation(
+        agreement: 0.5,
+        supportCount: 0,
+        totalWeight: 0,
+      );
+    }
+
+    const ratios = <_CrossScaleRatio>[
+      _CrossScaleRatio(ratio: 1.0, tolerance: 0.04, minToleranceBpm: 0.8),
+      _CrossScaleRatio(ratio: 0.5, tolerance: 0.05, minToleranceBpm: 1.2),
+      _CrossScaleRatio(ratio: 2.0, tolerance: 0.05, minToleranceBpm: 1.2),
+      _CrossScaleRatio(ratio: 1.5, tolerance: 0.045, minToleranceBpm: 1.1),
+      _CrossScaleRatio(ratio: 2 / 3, tolerance: 0.045, minToleranceBpm: 1.1),
+      _CrossScaleRatio(ratio: 4 / 3, tolerance: 0.045, minToleranceBpm: 1.1),
+      _CrossScaleRatio(ratio: 3 / 4, tolerance: 0.045, minToleranceBpm: 1.1),
+      _CrossScaleRatio(ratio: 5 / 4, tolerance: 0.05, minToleranceBpm: 1.15),
+      _CrossScaleRatio(ratio: 4 / 5, tolerance: 0.05, minToleranceBpm: 1.15),
+      _CrossScaleRatio(ratio: 3.0, tolerance: 0.05, minToleranceBpm: 1.3),
+    ];
+
+    final votes = <double, _CrossScaleVote>{};
+    var totalWeight = 0.0;
+
+    for (final detail in details) {
+      final weight = detail.weightedScore;
+      if (!weight.isFinite || weight <= 0 || !detail.bpm.isFinite) {
+        continue;
+      }
+      totalWeight += weight;
+
+      for (final ratio in ratios) {
+        final expected = targetBpm * ratio.ratio;
+        if (!expected.isFinite || expected <= 0) {
+          continue;
+        }
+
+        final diff = (detail.bpm - expected).abs();
+        final toleranceBpm =
+            max(ratio.minToleranceBpm, expected.abs() * ratio.tolerance);
+        if (diff <= toleranceBpm + 1e-9) {
+          final vote = votes.putIfAbsent(
+            ratio.ratio,
+            () => _CrossScaleVote(ratio: ratio.ratio),
+          );
+          vote.weight += weight;
+          vote.count += 1;
+          if (weight > vote.bestWeight + 1e-9) {
+            vote.bestWeight = weight;
+            vote.bestDetail = detail;
+          }
+        }
+      }
+    }
+
+    if (votes.isEmpty || totalWeight <= 0) {
+      return _CrossScaleEvaluation(
+        agreement: 0.5,
+        supportCount: 0,
+        totalWeight: totalWeight,
+        winnerRatio: 1.0,
+        winnerWeight: 0.0,
+        winnerCount: 0,
+      );
+    }
+
+    final currentVote = votes[1.0];
+    final agreement = currentVote != null && totalWeight > 0
+        ? (currentVote.weight / totalWeight).clamp(0.0, 1.0).toDouble()
+        : 0.0;
+
+    _CrossScaleVote? winner;
+    for (final vote in votes.values) {
+      if (winner == null || vote.weight > winner.weight + 1e-9) {
+        winner = vote;
+      }
+    }
+
+    _ScaleDetail? overrideDetail;
+    double? overrideRatio;
+
+    if (winner != null &&
+        winner.ratio != 1.0 &&
+        winner.bestDetail != null) {
+      final currentWeight = currentVote?.weight ?? 0.0;
+      final dominance = currentWeight <= 0
+          ? winner.count >= 2
+          : winner.weight >= currentWeight * 1.2;
+      final majority = winner.count >= 2;
+      final dominatesTotal = totalWeight > 0
+          ? winner.weight >= totalWeight * 0.55
+          : false;
+      final insufficientCurrent = currentVote == null ||
+          currentVote.count <= 1 ||
+          agreement < 0.35;
+
+      final withinBounds = winner.bestDetail!.bpm >= minBpm * 0.9 &&
+          winner.bestDetail!.bpm <= maxBpm * 1.02;
+
+      if (dominance && (majority || dominatesTotal) && insufficientCurrent &&
+          withinBounds) {
+        overrideDetail = winner.bestDetail;
+        overrideRatio = winner.ratio;
+      }
+    }
+
+    return _CrossScaleEvaluation(
+      agreement: agreement,
+      supportCount: currentVote?.count ?? 0,
+      totalWeight: totalWeight,
+      overrideDetail: overrideDetail,
+      overrideRatio: overrideRatio,
+      winnerRatio: winner?.ratio,
+      winnerWeight: winner?.weight,
+      winnerCount: winner?.count,
+    );
+  }
+}
+
+class _CrossScaleEvaluation {
+  const _CrossScaleEvaluation({
+    required this.agreement,
+    required this.supportCount,
+    required this.totalWeight,
+    this.overrideDetail,
+    this.overrideRatio,
+    this.winnerRatio,
+    this.winnerWeight,
+    this.winnerCount,
+  });
+
+  final double agreement;
+  final int supportCount;
+  final double totalWeight;
+  final _ScaleDetail? overrideDetail;
+  final double? overrideRatio;
+  final double? winnerRatio;
+  final double? winnerWeight;
+  final int? winnerCount;
+}
+
+class _CrossScaleVote {
+  _CrossScaleVote({
+    required this.ratio,
+  });
+
+  final double ratio;
+  double weight = 0.0;
+  int count = 0;
+  double bestWeight = 0.0;
+  _ScaleDetail? bestDetail;
+}
+
+class _CrossScaleRatio {
+  const _CrossScaleRatio({
+    required this.ratio,
+    this.tolerance = 0.045,
+    this.minToleranceBpm = 1.0,
+  });
+
+  final double ratio;
+  final double tolerance;
+  final double minToleranceBpm;
+}
+
+class _ScaleDetail {
+  const _ScaleDetail({
+    required this.level,
+    required this.scale,
+    required this.lagSamples,
+    required this.score,
+    required this.weightedScore,
+    required this.bpm,
+    required this.envelope,
+  });
+
+  final int level;
+  final int scale;
+  final int lagSamples;
+  final double score;
+  final double weightedScore;
+  final double bpm;
+  final List<double> envelope;
 }
 
 const sqrt2Constant = 1.4142135623730951;

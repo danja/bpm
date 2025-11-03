@@ -1,3 +1,6 @@
-exploring ways to improve autop’s anchor estimation by incorporating signal context like rawBpm and histogram scores to better handle tricky cases like musicals. I’m considering
-  adding weighted contributions around the plpAnchorBpm using ratio expansions to boost histogram support for target tempos, aiming to blend these factors for a more reliable
-  selection without cross-algorithm access.
+☒ Implement proper HPS for autocorrelation lag scores
+☒ Test autocorrelation HPS improvements
+☒ Implement wavelet cross-scale validation
+☒ Enhance preprocessing with multi-band onset detection
+☐ Run full test suite and measure improvements
+☐ Document and commit final improvements
